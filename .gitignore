@@ -1,0 +1,15 @@
+# Configuracao pessoal: tem precedencia sobre default.psd1 e nao vai para o repo
+config/custom.psd1
+
+# Saidas de execucao
+*.log
+*-result.txt
+*.bak
+
+# Nunca versionar: os RustDesk.toml carregam senha, salt e chaves do dispositivo
+RustDesk.toml
+RustDesk2.toml
+
+# Windows
+Thumbs.db
+desktop.ini
