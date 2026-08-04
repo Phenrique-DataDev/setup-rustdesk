@@ -120,6 +120,38 @@ todos os indicadores verdes).
 
 ---
 
+## O que o Terminal consegue fazer com a tela bloqueada
+
+Com a tela bloqueada você perde **os olhos e as mãos** da máquina, não o resto. O
+processo do Terminal continua na sessão interativa do usuário (`SessionId 1`) e a sessão
+não é derrubada — mas o desktop de entrada passa a ser inacessível.
+
+| Funciona | Não funciona |
+|---|---|
+| Shell, arquivos, scripts, rede | Captura de tela (`CopyFromScreen` → *Identificador inválido*) |
+| `git`, `gh`, chamadas de API | Teclado (`SendKeys` → **Acesso negado**) |
+| Iniciar e parar serviços | Apps da Microsoft Store (Notepad, Calc) |
+| Docker: subir o Docker Desktop e rodar containers | Automação de GUI em geral |
+| Ollama: subir o serviço e inferir na GPU | |
+| Registrar e remover tarefas agendadas | |
+| Apps Win32 clássicos — iniciam e criam janela (invisível) | |
+
+Duas pegadinhas:
+
+- **Apps da Store falham com uma mensagem enganosa**: *"o sistema não pode encontrar
+  todas as informações necessárias"*. Não é caminho errado — é o desktop indisponível. O
+  mesmo comando funciona com a tela desbloqueada. Executáveis Win32 clássicos
+  (`charmap.exe`, por exemplo) iniciam normalmente e até recebem um `MainWindowHandle`
+  válido; a janela simplesmente não é exibida.
+- **`SetCursorPos` retorna `True` e a coordenada realmente muda**, mas não há desktop de
+  entrada onde isso produza efeito. É um falso positivo — não use como prova de que a
+  automação de mouse está funcionando.
+
+Na prática: quase toda tarefa de engenharia (build, deploy, dados, containers, LLM local)
+roda igual com a tela bloqueada. O que não roda é **validar o resultado visualmente**.
+
+---
+
 ## Estrutura
 
 ```
@@ -166,6 +198,16 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
 - **`Start-Process explorer.exe` com argumentos não lança a UI.** O explorer trata a
   string inteira como caminho a abrir. Para lançar sem elevação a partir de um console
   elevado, use uma tarefa agendada temporária (`Interactive` / `Limited`).
+- **Detectar "a tela está bloqueada" é mais difícil do que parece.** Duas técnicas comuns
+  mentem no Windows 11 (26200): `quser` reporta a sessão como `Ativo` mesmo bloqueada, e
+  `OpenInputDesktop` + `UOI_NAME` devolve `Default` em vez de `Winlogon`. `Get-Process
+  LogonUI` acertou nos testes — nenhum script deste repositório depende disso hoje, mas
+  fica o registro para quem for escrever uma checagem.
+- **Logo após o bloqueio existe uma janela de corrida de alguns segundos.** Cerca de 6s
+  depois de `LockWorkStation`, o `LogonUI` já estava no ar e a captura de tela **ainda
+  funcionava**, devolvendo a imagem da própria lock screen; só depois o acesso gráfico
+  caiu de vez. Quem checar estado imediatamente após o lock lê um resultado inconsistente
+  — aguarde a transição terminar.
 
 ---
 
@@ -175,6 +217,12 @@ Nenhuma verificação automatizada cobre o caminho real de ponta a ponta: **cone
 outra máquina com a tela bloqueada e abrir o Terminal**. As checagens confirmam que a
 configuração está correta nos dois perfis, não que a conexão funciona. Faça esse teste
 manualmente — `Win+L` e conecte de outro dispositivo.
+
+**Validado manualmente em 2026-08-04** (Windows 11 Pro 26200, RustDesk 1.4.9): com a
+sessão já conectada por RustDesk, bloquear a tela via `LockWorkStation` **não derrubou o
+Terminal** — a sessão console permaneceu `Ativo`, o serviço `rustdesk` seguiu `Running` e
+os comandos continuaram executando sem reconexão. É um único ponto de dado, de uma
+máquina configurada por este repositório; repita na sua.
 
 Se falhar mesmo com tudo verde, olhe os logs:
 
