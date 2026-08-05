@@ -188,7 +188,7 @@ Saídas, na ordem em que valem a pena:
 
 | Ação | Efeito |
 |---|---|
-| `.\scripts\Show-AgentTranscript.ps1` | Abre o histórico do chat num pager navegável por teclado — **a única rota que funciona para o chat do agente** |
+| `pwsh -File .\scripts\Show-AgentTranscript.ps1` | Abre o histórico do chat num pager navegável por teclado — **a única rota que funciona para o chat do agente** |
 | `[advanced] scrollback_limit_bytes` | Aumenta o histórico — **só para panes criados depois**; os existentes mantêm o buffer atual |
 | `[ui] mouse_capture = false` | Devolve a roda ao terminal em vez de o multiplexador capturá-la |
 | `prefix` + `e` (`edit_scrollback`) | Abre o scrollback do pane num editor — serve para shells, **não** para o chat |
@@ -210,6 +210,15 @@ herdr pane read <pane_id> --source recent --lines 20
 Nenhum modo cópia, nenhum aumento de `scrollback_limit_bytes` e nenhuma configuração do
 RustDesk recupera esse conteúdo, porque ele nunca chegou ao terminal. O histórico real
 vive no `.jsonl` da sessão, e é isso que o `Show-AgentTranscript.ps1` lê.
+
+Duas pegadinhas de ambiente ao rodar o script:
+
+- **Use `pwsh` (PowerShell 7), não o 5.1.** No 5.1 a `ExecutionPolicy` de `LocalMachine`
+  costuma estar `Undefined` — equivale a `Restricted` e bloqueia o script com
+  `UnauthorizedAccess`. Alternativa: `powershell -ExecutionPolicy Bypass -File ...`.
+- **O `less` do Git não está no PATH do PowerShell**, só no Git Bash. O script procura
+  nos caminhos de instalação do Git; sem isso, o fallback seria o `more.com`, que não
+  rola para trás nem exibe acentos — ou seja, não resolveria nada.
 
 Duas correções em relação a versões anteriores desta nota: o Herdr 0.7.2 **não tem** modo
 cópia estilo tmux em `prefix` + `[` (o equivalente é `edit_scrollback`, em `prefix` + `e`),

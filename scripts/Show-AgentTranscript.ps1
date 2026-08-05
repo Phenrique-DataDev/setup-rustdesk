@@ -16,6 +16,15 @@
     Navegacao no less: setas/PgUp/PgDn rolam, 'g'/'G' vao ao inicio/fim,
     '/texto' busca, 'q' sai.
 
+    Rode no PowerShell 7 (pwsh), nao no Windows PowerShell 5.1: neste a
+    ExecutionPolicy de LocalMachine costuma estar Undefined, o que equivale a
+    Restricted e bloqueia o script. Se precisar do 5.1, use
+    'powershell -ExecutionPolicy Bypass -File .\scripts\Show-AgentTranscript.ps1'.
+
+    O pager usado e o less do Git for Windows. Ele quase nunca esta no PATH do
+    PowerShell (so no Git Bash), entao o script o procura tambem nos caminhos
+    de instalacao do Git.
+
 .EXAMPLE
     .\scripts\Show-AgentTranscript.ps1
     Abre a sessao mais recente do projeto atual.
@@ -128,11 +137,40 @@ $saida = $cabecalho + $linhas
 
 if ($Raw) { $saida; return }
 
-$pager = Get-Command less -ErrorAction SilentlyContinue
-if ($pager) {
-    # -R preserva cores, +G abre no fim (a parte mais recente da conversa)
-    $saida | & $pager.Source -R +G
-} else {
-    Write-Warning "less nao encontrado - usando 'more'. Sem busca e sem rolagem pra tras."
-    $saida | more.com
+# O less do Git for Windows quase nunca esta no PATH do PowerShell (so no Git
+# Bash), entao procurar so com Get-Command cai no more.com - que nao rola pra
+# tras nem entende UTF-8, ou seja, nao resolve o problema que motivou o script.
+function Find-Less {
+    $noPath = Get-Command less -ErrorAction SilentlyContinue
+    if ($noPath) { return $noPath.Source }
+
+    $candidatos = @(
+        "$env:ProgramFiles\Git\usr\bin\less.exe"
+        "${env:ProgramFiles(x86)}\Git\usr\bin\less.exe"
+        "$env:LOCALAPPDATA\Programs\Git\usr\bin\less.exe"
+    )
+    # se o git esta instalado em lugar atipico, derivar do proprio executavel
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($git) {
+        $raiz = Split-Path (Split-Path $git.Source -Parent) -Parent
+        $candidatos += (Join-Path $raiz 'usr\bin\less.exe')
+    }
+
+    $candidatos | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 }
+
+$less = Find-Less
+if ($less) {
+    $env:LESSCHARSET = 'utf-8'   # sem isto os acentos viram escapes no less
+    # -R preserva cores, +G abre no fim (a parte mais recente da conversa)
+    $saida | & $less -R +G
+    return
+}
+
+# Sem less, nao ha pager utilizavel: o more.com nao rola pra tras nem le UTF-8,
+# entao entregar o arquivo vale mais que paginar errado.
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) "transcript-$($file.BaseName).txt"
+[System.IO.File]::WriteAllLines($tmp, [string[]]$saida, [System.Text.UTF8Encoding]::new($false))
+Write-Warning "less nao encontrado (instale o Git for Windows ou ponha less.exe no PATH)."
+Write-Host "transcricao gravada em: $tmp"
+Write-Host "abra no seu editor - o more.com nao rola pra tras nem exibe acentos."
