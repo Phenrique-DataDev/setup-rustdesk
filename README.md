@@ -7,6 +7,12 @@ padrão costuma falhar.
 Clone, rode um comando, e a máquina fica pronta: instalação, configuração das **duas**
 configs, watchdog e verificação automatizada.
 
+O escopo é o **acesso remoto de ponta a ponta**, não apenas o RustDesk. Na prática o
+RustDesk entrega o transporte e o [Herdr](https://herdr.dev) é o terminal usado dentro da
+sessão — por isso a configuração e as armadilhas dos dois estão documentadas aqui. Os
+scripts automatizam só a parte do RustDesk; o que é do Herdr está descrito para ser
+aplicado à mão. Veja [O terminal dentro da sessão](#o-terminal-dentro-da-sessão-herdr).
+
 ---
 
 ## Início rápido
@@ -189,6 +195,57 @@ Saídas, na ordem em que valem a pena:
 
 Antes de culpar o acesso remoto, reproduza sentado na máquina: se o comportamento é o
 mesmo, o RustDesk está fora da equação.
+
+---
+
+## O terminal dentro da sessão (Herdr)
+
+O RustDesk resolve o transporte; ele não resolve o que acontece com o seu trabalho quando
+a conexão cai. Por isso o terminal usado dentro da sessão é o [Herdr](https://herdr.dev),
+um gerenciador de workspaces que mantém os processos vivos num servidor próprio:
+
+```
+WindowsTerminal.exe -> pwsh -> herdr (client) -> herdr server -> shell -> processo
+```
+
+O cliente é descartável. Se a conexão RustDesk cair, se a tela bloquear ou se você fechar
+o terminal, o `herdr server` continua rodando na sessão do usuário e os processos seguem
+com ele — ao reconectar, é só reatachar e o trabalho está no ponto em que parou. É o
+mesmo motivo pelo qual se usa `tmux` sobre SSH, com a diferença de que aqui isso vale
+também para a conexão gráfica.
+
+Combinado com a configuração da tela bloqueada deste repositório, o resultado é: a máquina
+aceita a conexão sem ninguém logado, e o que estava rodando continua rodando.
+
+### Configuração recomendada
+
+Nada disso é automatizado pelos scripts. O arquivo fica em
+`%APPDATA%\herdr\config.toml`:
+
+```toml
+[ui]
+mouse_capture = false          # devolve a roda do mouse ao terminal
+
+[advanced]
+scrollback_limit_bytes = 10485760   # 10 MB de histórico por pane
+```
+
+Aplique sem reiniciar a sessão:
+
+```powershell
+herdr server reload-config
+```
+
+O comando responde `"status":"applied"` com `diagnostics` vazio quando o arquivo é válido
+— se houver erro de sintaxe, ele aparece ali em vez de derrubar o servidor.
+
+Duas ressalvas que custam tempo:
+
+- **`scrollback_limit_bytes` só vale para panes criados depois.** Os existentes mantêm o
+  buffer que já tinham. Abra um pane novo para testar.
+- **Grave o `config.toml` como UTF-8 sem BOM**, mesma armadilha do `.toml` do RustDesk
+  descrita em [Armadilhas conhecidas](#armadilhas-conhecidas). Faça um backup antes de
+  editar: com `config.toml.bak` ao lado, reverter é copiar por cima e recarregar.
 
 ---
 
