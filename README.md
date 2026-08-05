@@ -150,6 +150,46 @@ Duas pegadinhas:
 Na prática: quase toda tarefa de engenharia (build, deploy, dados, containers, LLM local)
 roda igual com a tela bloqueada. O que não roda é **validar o resultado visualmente**.
 
+### Não consigo rolar a tela nem subir o histórico — é o RustDesk?
+
+Quase sempre **não**. O RustDesk transporta a imagem e repassa os eventos de mouse; ele
+não decide o que rola. O culpado costuma estar na pilha de terminais do outro lado.
+
+O caso concreto que motivou esta nota: um agente de IA rodando dentro de um multiplexador
+(Herdr), que por sua vez roda dentro do Windows Terminal — três camadas disputando o mesmo
+evento de roda:
+
+```
+WindowsTerminal.exe -> pwsh -> herdr (client) -> herdr server -> powershell -> agente
+```
+
+A causa é o **alternate screen**. Aplicações de tela cheia (vim, htop, TUIs de agentes)
+desenham na tela alternativa: não geram scrollback e recebem os eventos de roda
+diretamente. Não é que a rolagem falhe — não existe histórico para rolar.
+
+Como confirmar em vez de adivinhar (exemplo com Herdr, mas todo multiplexador tem
+equivalente):
+
+```powershell
+herdr api snapshot | jq '.. | objects | select(.scroll != null) | .scroll'
+# {"max_offset_from_bottom": 0, "offset_from_bottom": 0, "viewport_rows": 42}
+```
+
+`max_offset_from_bottom: 0` prova que o buffer está vazio — o problema não está no
+transporte, e mexer na configuração do RustDesk não vai resolver.
+
+Saídas, na ordem em que valem a pena:
+
+| Ação | Efeito |
+|---|---|
+| Modo cópia do multiplexador (no Herdr, `prefix` + `[`) | Navega o conteúdo pelo teclado, sem depender do mouse |
+| `[ui] mouse_capture = false` | Devolve a roda ao terminal em vez de o multiplexador capturá-la |
+| `[advanced] scrollback_limit_bytes` | Aumenta o histórico — **só para panes criados depois**; os existentes mantêm o buffer atual |
+| `Shift+Ctrl` durante o gesto | Bypass pontual, sem alterar configuração |
+
+Antes de culpar o acesso remoto, reproduza sentado na máquina: se o comportamento é o
+mesmo, o RustDesk está fora da equação.
+
 ---
 
 ## Estrutura
