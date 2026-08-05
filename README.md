@@ -225,8 +225,38 @@ cópia estilo tmux em `prefix` + `[` (o equivalente é `edit_scrollback`, em `pr
 e **não há** bypass com `Shift` — o `right_click_passthrough_modifier` documenta que Shift
 é intencionalmente não suportado, porque terminais costumam reservá-lo.
 
-Antes de culpar o acesso remoto, reproduza sentado na máquina: se o comportamento é o
-mesmo, o RustDesk está fora da equação.
+#### Quando o RustDesk *está* na equação: o Terminal embutido
+
+A ressalva acima vale para a **área de trabalho remota**. Ela não vale para o **Terminal
+do RustDesk** (o recurso `enable-terminal`), e foi aí que este repositório errou.
+
+O Terminal do RustDesk não é o Windows Terminal transportado: é um widget `xterm.dart`
+dentro do cliente Flutter, com um *ring buffer* de ~1 MB de output por sessão — buffer de
+saída, não scrollback de terminal. Com um multiplexador ocupando a tela inteira, não há
+conteúdo nesse buffer e a roda não tem o que rolar. Nenhuma configuração do host
+(`mouse_capture`, `scrollback_limit_bytes`) ou do serviço RustDesk alcança isso: a decisão
+é do cliente.
+
+O teste que separa os dois casos:
+
+| Onde você roda | Rola? | Conclusão |
+|---|---|---|
+| Sentado na máquina | sim | o terminal e o multiplexador estão bem |
+| Área de trabalho remota via RustDesk | sim | transporte ok |
+| **Terminal do RustDesk** | **não** | limitação do widget de terminal do cliente |
+
+Saídas, quando é este o caso:
+
+- **`Show-AgentTranscript.ps1`** — lê o histórico do `.jsonl` e pagina no `less`. Independe
+  do transporte, funciona inclusive pelo cliente Android.
+- **Área de trabalho remota** em vez do Terminal — mais pesada, mas a roda funciona.
+- **`herdr --remote <ssh-target>`** — o cliente Herdr roda no *seu* terminal local e fala
+  com o servidor por SSH. Exige um servidor SSH no host (OpenSSH Server, requer
+  Administrador e abre porta — decisão consciente).
+
+Antes de culpar o acesso remoto, reproduza sentado na máquina. Se o comportamento é o
+mesmo, o RustDesk está fora da equação — mas se só falha pelo Terminal embutido, ele é
+exatamente a causa.
 
 ---
 
