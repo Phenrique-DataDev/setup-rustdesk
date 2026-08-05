@@ -188,10 +188,33 @@ Saídas, na ordem em que valem a pena:
 
 | Ação | Efeito |
 |---|---|
-| Modo cópia do multiplexador (no Herdr, `prefix` + `[`) | Navega o conteúdo pelo teclado, sem depender do mouse |
-| `[ui] mouse_capture = false` | Devolve a roda ao terminal em vez de o multiplexador capturá-la |
+| `.\scripts\Show-AgentTranscript.ps1` | Abre o histórico do chat num pager navegável por teclado — **a única rota que funciona para o chat do agente** |
 | `[advanced] scrollback_limit_bytes` | Aumenta o histórico — **só para panes criados depois**; os existentes mantêm o buffer atual |
-| `Shift+Ctrl` durante o gesto | Bypass pontual, sem alterar configuração |
+| `[ui] mouse_capture = false` | Devolve a roda ao terminal em vez de o multiplexador capturá-la |
+| `prefix` + `e` (`edit_scrollback`) | Abre o scrollback do pane num editor — serve para shells, **não** para o chat |
+
+#### Por que o modo cópia não resolve o chat do agente
+
+Vale separar dois sintomas que parecem o mesmo:
+
+- **Shell comum sem rolagem** → é scrollback de verdade. `mouse_capture`, `scrollback_limit_bytes`
+  e `prefix` + `e` resolvem.
+- **Chat do agente sem rolagem** → não existe buffer para copiar. A TUI ocupa a tela
+  alternativa e o Herdr só retém o buffer primário. Verificável:
+
+```powershell
+herdr pane read <pane_id> --source recent --lines 20
+# devolve apenas o prompt do shell ("❯") — o chat inteiro está fora do buffer
+```
+
+Nenhum modo cópia, nenhum aumento de `scrollback_limit_bytes` e nenhuma configuração do
+RustDesk recupera esse conteúdo, porque ele nunca chegou ao terminal. O histórico real
+vive no `.jsonl` da sessão, e é isso que o `Show-AgentTranscript.ps1` lê.
+
+Duas correções em relação a versões anteriores desta nota: o Herdr 0.7.2 **não tem** modo
+cópia estilo tmux em `prefix` + `[` (o equivalente é `edit_scrollback`, em `prefix` + `e`),
+e **não há** bypass com `Shift` — o `right_click_passthrough_modifier` documenta que Shift
+é intencionalmente não suportado, porque terminais costumam reservá-lo.
 
 Antes de culpar o acesso remoto, reproduza sentado na máquina: se o comportamento é o
 mesmo, o RustDesk está fora da equação.
