@@ -358,6 +358,45 @@ aceita a conexão com a **tela bloqueada**, e o que estava rodando continua roda
 Note o limite, que é preciso: *tela bloqueada*, não *sem ninguém logado*. Veja
 [Tela bloqueada não é o mesmo que logoff](#tela-bloqueada-não-é-o-mesmo-que-logoff).
 
+### O que sobrevive a quê
+
+A pergunta que decide se você pode confiar um trabalho longo a esta stack. A regra é uma
+só: **o trabalho continua enquanto o `herdr server` estiver vivo**, e ele vive na sessão do
+Windows do usuário.
+
+| Acontece | Servidor | Seu trabalho |
+|---|---|---|
+| A conexão RustDesk cai | vive | **continua rodando** |
+| Você fecha o cliente Herdr ou o terminal | vive | **continua rodando** |
+| Você bloqueia a tela (`Win+L`) | vive | **continua rodando** |
+| Você desanexa (`prefix` + `q`) | vive | **continua rodando** |
+| **Logoff** | morre | **morre junto** |
+| **Reboot / shutdown** | morre | **morre junto** |
+| `herdr server stop` | morre | **morre junto** |
+
+Na primeira metade da tabela você reconecta e o build que estava a 40% está a 70%. É o caso
+de uso que justifica o Herdr aqui, e cobre tudo que é falha de rede ou de cliente — o
+comum quando se acessa de fora.
+
+#### O que `resume_agents_on_restore` e `pane_history` realmente fazem
+
+Eles atuam na segunda metade da tabela, e é fácil esperar demais deles:
+
+- **Retomam a sessão do agente e a tela do pane.** Na prática o agente é reaberto com
+  `--resume`, então a conversa volta e você pode escrever de novo.
+- **Não ressuscitam processo nenhum.** Um `npm run build` interrompido pelo logoff não
+  recomeça sozinho; um agente que estava trabalhando volta parado, não trabalhando.
+
+Restaurar o histórico não é o mesmo que retomar a execução — a distinção só aparece quando
+você precisa dela, geralmente no pior momento.
+
+**Verificado em 2026-08-06**: após um logoff com três sessões de agente abertas, as três
+voltaram pelo `--resume`, disponíveis para escrever. Nenhuma retomou trabalho em andamento.
+
+**Consequência prática:** para atravessar um reboot ou logoff, o trabalho precisa ser
+retomável por conta própria — script idempotente, job com checkpoint, fila que reprocessa.
+Estar dentro do Herdr não basta. Contra queda de conexão, basta e sobra.
+
 ### Instalação e autostart
 
 `.\Setup.ps1 -Herdr` (incluído no `-All`) faz os três passos: instala o Herdr se faltar,
