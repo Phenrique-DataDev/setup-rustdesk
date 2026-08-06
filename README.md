@@ -281,18 +281,50 @@ aceita a conexão sem ninguém logado, e o que estava rodando continua rodando.
 
 ### Configuração recomendada
 
-Nada disso é automatizado pelos scripts. O arquivo fica em
-`%APPDATA%\herdr\config.toml`:
+As opções vivem em `config/herdr.psd1` e são aplicadas por
+`scripts\Set-HerdrConfig.ps1` (não precisa de Administrador). O destino é
+`%APPDATA%\herdr\config.toml`.
+
+A configuração deste repositório parte de uma premissa concreta: **acesso pelo Terminal
+embutido do RustDesk, de outras redes, incluindo Android.** Nesse transporte a roda do
+mouse não rola nada, então tudo é orientado a teclado, tela pequena e conexão que cai.
 
 ```toml
 [ui]
-mouse_capture = false          # devolve a roda do mouse ao terminal
+hide_tab_bar_when_single_tab = true   # ganha uma linha
+pane_gaps = false                     # ganha linhas e colunas entre panes
+sidebar_collapsed_mode = "hidden"     # largura zero ao colapsar (prefix+b reabre)
+show_agent_labels_on_pane_borders = true  # sem sidebar, é o que diz quem é quem
+mobile_width_threshold = 90           # layout de coluna única no celular
+redraw_on_focus_gained = true         # a superfície corrompe mais em sessão remota
+
+[ui.toast]
+delivery = "herdr"                    # toast dentro da TUI — atravessa o transporte
+
+[ui.sound]
+enabled = false                       # áudio gasta banda para dizer o que o toast já diz
+
+[session]
+resume_agents_on_restore = true       # retoma os agentes após restart do servidor
+
+[experimental]
+pane_history = true                   # preserva a tela dos panes entre restarts
 
 [advanced]
-scrollback_limit_bytes = 10485760   # 10 MB de histórico por pane
+scrollback_limit_bytes = 10485760     # 10 MB de histórico por pane
 ```
 
-Aplique sem reiniciar a sessão:
+Sobre `[experimental] pane_history`: é experimental e vem desligado. Ligamos aqui porque
+queda de conexão em rede alheia é o caso comum, não a exceção — se preferir o
+comportamento oficial, remova a seção.
+
+Aplique:
+
+```powershell
+pwsh -File .\scripts\Set-HerdrConfig.ps1
+```
+
+Ou, editando o `config.toml` na mão, sem reiniciar a sessão:
 
 ```powershell
 herdr server reload-config
@@ -308,6 +340,26 @@ Duas ressalvas que custam tempo:
 - **Grave o `config.toml` como UTF-8 sem BOM**, mesma armadilha do `.toml` do RustDesk
   descrita em [Armadilhas conhecidas](#armadilhas-conhecidas). Faça um backup antes de
   editar: com `config.toml.bak` ao lado, reverter é copiar por cima e recarregar.
+
+### Operando sem a roda do mouse
+
+Pelo Terminal do RustDesk, estes atalhos são o que substitui o mouse. O prefixo é
+`ctrl+b` — pressione e solte, depois a tecla da ação.
+
+| Atalho | Ação | Por que importa aqui |
+|---|---|---|
+| `prefix` + `z` | Zoom no pane (alterna) | O melhor uso de tela pequena: um pane ocupa tudo |
+| `prefix` + `b` | Mostra/esconde a sidebar | Recupera colunas quando precisa do conteúdo |
+| `prefix` + `e` | Abre o scrollback do pane num editor | Rolagem por teclado em panes de **shell** |
+| `prefix` + `h` `j` `k` `l` | Move o foco entre panes | Navegação sem clique |
+| `prefix` + `tab` | Alterna para o próximo pane | Ida e volta rápida |
+| `prefix` + `c` / `prefix` + `1..9` | Nova aba / vai para a aba N | Com a barra de abas escondida, é como se navega |
+| `prefix` + `v` / `prefix` + `-` | Divide vertical / horizontal | |
+| `prefix` + `q` | Desanexa (deixa tudo rodando) | Sair sem matar nada |
+| `prefix` + `?` | Ajuda com todos os atalhos | |
+
+O `prefix` + `e` **não** serve para o chat do agente — a TUI não gera scrollback. Para ler
+o histórico da conversa, use o `Show-AgentTranscript.ps1`.
 
 ---
 
