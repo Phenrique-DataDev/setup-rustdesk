@@ -98,6 +98,35 @@ function Get-RustDeskPaths {
     }
 }
 
+function Get-HerdrPaths {
+    <#
+    .SYNOPSIS
+        Caminhos do Herdr, o terminal usado dentro da sessao remota.
+    .DESCRIPTION
+        O Herdr nao e requisito do RustDesk: se nao estiver instalado, Installed
+        vem $false e os passos que dependem dele devem ser pulados, nao falhar.
+        A config fica no perfil do usuario - nada aqui exige elevacao.
+    #>
+    [CmdletBinding()] param()
+
+    $exe = $null
+    $cmd = Get-Command herdr.exe -ErrorAction SilentlyContinue
+    if ($cmd) { $exe = $cmd.Source }
+    if (-not $exe) {
+        $c = Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe'
+        if (Test-Path -LiteralPath $c) { $exe = $c }
+    }
+
+    return [PSCustomObject]@{
+        Exe        = $exe
+        Installed  = [bool]$exe
+        ConfigDir  = Join-Path $env:APPDATA 'herdr'
+        Config     = Join-Path $env:APPDATA 'herdr\config.toml'
+        Socket     = Join-Path $env:APPDATA 'herdr\herdr.sock'
+        ServerLog  = Join-Path $env:APPDATA 'herdr\herdr-server.log'
+    }
+}
+
 function Stop-RustDeskClean {
     <#
     .SYNOPSIS
@@ -205,5 +234,6 @@ function Start-RustDeskUI {
     return $log
 }
 
-Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Import-RustDeskConfigFile,
+Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Get-HerdrPaths,
+                              Import-RustDeskConfigFile,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI

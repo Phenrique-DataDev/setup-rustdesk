@@ -188,13 +188,75 @@ Saídas, na ordem em que valem a pena:
 
 | Ação | Efeito |
 |---|---|
-| Modo cópia do multiplexador (no Herdr, `prefix` + `[`) | Navega o conteúdo pelo teclado, sem depender do mouse |
-| `[ui] mouse_capture = false` | Devolve a roda ao terminal em vez de o multiplexador capturá-la |
+| `pwsh -File .\scripts\Show-AgentTranscript.ps1` | Abre o histórico do chat num pager navegável por teclado — **a única rota que funciona para o chat do agente** |
 | `[advanced] scrollback_limit_bytes` | Aumenta o histórico — **só para panes criados depois**; os existentes mantêm o buffer atual |
-| `Shift+Ctrl` durante o gesto | Bypass pontual, sem alterar configuração |
+| `[ui] mouse_capture = false` | Devolve a roda ao terminal em vez de o multiplexador capturá-la |
+| `prefix` + `e` (`edit_scrollback`) | Abre o scrollback do pane num editor — serve para shells, **não** para o chat |
 
-Antes de culpar o acesso remoto, reproduza sentado na máquina: se o comportamento é o
-mesmo, o RustDesk está fora da equação.
+#### Por que o modo cópia não resolve o chat do agente
+
+Vale separar dois sintomas que parecem o mesmo:
+
+- **Shell comum sem rolagem** → é scrollback de verdade. `mouse_capture`, `scrollback_limit_bytes`
+  e `prefix` + `e` resolvem.
+- **Chat do agente sem rolagem** → não existe buffer para copiar. A TUI ocupa a tela
+  alternativa e o Herdr só retém o buffer primário. Verificável:
+
+```powershell
+herdr pane read <pane_id> --source recent --lines 20
+# devolve apenas o prompt do shell ("❯") — o chat inteiro está fora do buffer
+```
+
+Nenhum modo cópia, nenhum aumento de `scrollback_limit_bytes` e nenhuma configuração do
+RustDesk recupera esse conteúdo, porque ele nunca chegou ao terminal. O histórico real
+vive no `.jsonl` da sessão, e é isso que o `Show-AgentTranscript.ps1` lê.
+
+Duas pegadinhas de ambiente ao rodar o script:
+
+- **Use `pwsh` (PowerShell 7), não o 5.1.** No 5.1 a `ExecutionPolicy` de `LocalMachine`
+  costuma estar `Undefined` — equivale a `Restricted` e bloqueia o script com
+  `UnauthorizedAccess`. Alternativa: `powershell -ExecutionPolicy Bypass -File ...`.
+- **O `less` do Git não está no PATH do PowerShell**, só no Git Bash. O script procura
+  nos caminhos de instalação do Git; sem isso, o fallback seria o `more.com`, que não
+  rola para trás nem exibe acentos — ou seja, não resolveria nada.
+
+Duas correções em relação a versões anteriores desta nota: o Herdr 0.7.2 **não tem** modo
+cópia estilo tmux em `prefix` + `[` (o equivalente é `edit_scrollback`, em `prefix` + `e`),
+e **não há** bypass com `Shift` — o `right_click_passthrough_modifier` documenta que Shift
+é intencionalmente não suportado, porque terminais costumam reservá-lo.
+
+#### Quando o RustDesk *está* na equação: o Terminal embutido
+
+A ressalva acima vale para a **área de trabalho remota**. Ela não vale para o **Terminal
+do RustDesk** (o recurso `enable-terminal`), e foi aí que este repositório errou.
+
+O Terminal do RustDesk não é o Windows Terminal transportado: é um widget `xterm.dart`
+dentro do cliente Flutter, com um *ring buffer* de ~1 MB de output por sessão — buffer de
+saída, não scrollback de terminal. Com um multiplexador ocupando a tela inteira, não há
+conteúdo nesse buffer e a roda não tem o que rolar. Nenhuma configuração do host
+(`mouse_capture`, `scrollback_limit_bytes`) ou do serviço RustDesk alcança isso: a decisão
+é do cliente.
+
+O teste que separa os dois casos:
+
+| Onde você roda | Rola? | Conclusão |
+|---|---|---|
+| Sentado na máquina | sim | o terminal e o multiplexador estão bem |
+| Área de trabalho remota via RustDesk | sim | transporte ok |
+| **Terminal do RustDesk** | **não** | limitação do widget de terminal do cliente |
+
+Saídas, quando é este o caso:
+
+- **`Show-AgentTranscript.ps1`** — lê o histórico do `.jsonl` e pagina no `less`. Independe
+  do transporte, funciona inclusive pelo cliente Android.
+- **Área de trabalho remota** em vez do Terminal — mais pesada, mas a roda funciona.
+- **`herdr --remote <ssh-target>`** — o cliente Herdr roda no *seu* terminal local e fala
+  com o servidor por SSH. Exige um servidor SSH no host (OpenSSH Server, requer
+  Administrador e abre porta — decisão consciente).
+
+Antes de culpar o acesso remoto, reproduza sentado na máquina. Se o comportamento é o
+mesmo, o RustDesk está fora da equação — mas se só falha pelo Terminal embutido, ele é
+exatamente a causa.
 
 ---
 
@@ -219,18 +281,50 @@ aceita a conexão sem ninguém logado, e o que estava rodando continua rodando.
 
 ### Configuração recomendada
 
-Nada disso é automatizado pelos scripts. O arquivo fica em
-`%APPDATA%\herdr\config.toml`:
+As opções vivem em `config/herdr.psd1` e são aplicadas por
+`scripts\Set-HerdrConfig.ps1` (não precisa de Administrador). O destino é
+`%APPDATA%\herdr\config.toml`.
+
+A configuração deste repositório parte de uma premissa concreta: **acesso pelo Terminal
+embutido do RustDesk, de outras redes, incluindo Android.** Nesse transporte a roda do
+mouse não rola nada, então tudo é orientado a teclado, tela pequena e conexão que cai.
 
 ```toml
 [ui]
-mouse_capture = false          # devolve a roda do mouse ao terminal
+hide_tab_bar_when_single_tab = true   # ganha uma linha
+pane_gaps = false                     # ganha linhas e colunas entre panes
+sidebar_collapsed_mode = "hidden"     # largura zero ao colapsar (prefix+b reabre)
+show_agent_labels_on_pane_borders = true  # sem sidebar, é o que diz quem é quem
+mobile_width_threshold = 90           # layout de coluna única no celular
+redraw_on_focus_gained = true         # a superfície corrompe mais em sessão remota
+
+[ui.toast]
+delivery = "herdr"                    # toast dentro da TUI — atravessa o transporte
+
+[ui.sound]
+enabled = false                       # áudio gasta banda para dizer o que o toast já diz
+
+[session]
+resume_agents_on_restore = true       # retoma os agentes após restart do servidor
+
+[experimental]
+pane_history = true                   # preserva a tela dos panes entre restarts
 
 [advanced]
-scrollback_limit_bytes = 10485760   # 10 MB de histórico por pane
+scrollback_limit_bytes = 10485760     # 10 MB de histórico por pane
 ```
 
-Aplique sem reiniciar a sessão:
+Sobre `[experimental] pane_history`: é experimental e vem desligado. Ligamos aqui porque
+queda de conexão em rede alheia é o caso comum, não a exceção — se preferir o
+comportamento oficial, remova a seção.
+
+Aplique:
+
+```powershell
+pwsh -File .\scripts\Set-HerdrConfig.ps1
+```
+
+Ou, editando o `config.toml` na mão, sem reiniciar a sessão:
 
 ```powershell
 herdr server reload-config
@@ -246,6 +340,26 @@ Duas ressalvas que custam tempo:
 - **Grave o `config.toml` como UTF-8 sem BOM**, mesma armadilha do `.toml` do RustDesk
   descrita em [Armadilhas conhecidas](#armadilhas-conhecidas). Faça um backup antes de
   editar: com `config.toml.bak` ao lado, reverter é copiar por cima e recarregar.
+
+### Operando sem a roda do mouse
+
+Pelo Terminal do RustDesk, estes atalhos são o que substitui o mouse. O prefixo é
+`ctrl+b` — pressione e solte, depois a tecla da ação.
+
+| Atalho | Ação | Por que importa aqui |
+|---|---|---|
+| `prefix` + `z` | Zoom no pane (alterna) | O melhor uso de tela pequena: um pane ocupa tudo |
+| `prefix` + `b` | Mostra/esconde a sidebar | Recupera colunas quando precisa do conteúdo |
+| `prefix` + `e` | Abre o scrollback do pane num editor | Rolagem por teclado em panes de **shell** |
+| `prefix` + `h` `j` `k` `l` | Move o foco entre panes | Navegação sem clique |
+| `prefix` + `tab` | Alterna para o próximo pane | Ida e volta rápida |
+| `prefix` + `c` / `prefix` + `1..9` | Nova aba / vai para a aba N | Com a barra de abas escondida, é como se navega |
+| `prefix` + `v` / `prefix` + `-` | Divide vertical / horizontal | |
+| `prefix` + `q` | Desanexa (deixa tudo rodando) | Sair sem matar nada |
+| `prefix` + `?` | Ajuda com todos os atalhos | |
+
+O `prefix` + `e` **não** serve para o chat do agente — a TUI não gera scrollback. Para ler
+o histórico da conversa, use o `Show-AgentTranscript.ps1`.
 
 ---
 
