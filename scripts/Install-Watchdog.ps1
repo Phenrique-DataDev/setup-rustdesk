@@ -70,9 +70,18 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
     -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$($paths.WatchdogScript)`""
 
 $trigger = New-ScheduledTaskTrigger -AtStartup
+# Sem -RepetitionDuration de proposito: Duration vazia significa "repetir
+# indefinidamente" para o Agendador de Tarefas, que e o que se quer aqui.
+#
+# NAO use [TimeSpan]::MaxValue para isso. E o truque que circula para "repetir
+# para sempre", mas ele serializa como P99999999DT23H59M59S e o Agendador
+# rejeita o XML inteiro:
+#   "O XML da tarefa contem um valor formatado incorretamente ou fora do
+#    intervalo. (8,42):Duration:P99999999DT23H59M59S"
+# O resultado e uma maquina sem watchdog nenhum - e como o erro nao e
+# terminante, o script seguia adiante dizendo que havia registrado.
 $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
-    -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)).Repetition
+    -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)).Repetition
 
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
 
@@ -87,7 +96,17 @@ $settings = New-ScheduledTaskSettingsSet `
 
 Register-ScheduledTask -TaskName $paths.TaskName -Action $action -Trigger $trigger `
     -Principal $principal -Settings $settings -Force | Out-Null
+
+# Confirmar em vez de afirmar: o Register pode falhar sem ser terminante, e
+# anunciar um watchdog que nao existe e pior do que nao ter watchdog.
+$reg = Get-ScheduledTask -TaskName $paths.TaskName -ErrorAction SilentlyContinue
+if (-not $reg) {
+    throw "a tarefa '$($paths.TaskName)' nao existe apos o registro. Sem watchdog, uma queda do servico so seria corrigida na mao."
+}
+$rep = $reg.Triggers[0].Repetition
+$dur = if ($rep.Duration) { $rep.Duration } else { 'indefinida' }
 $log += "tarefa '$($paths.TaskName)' registrada: no boot + a cada $IntervalMinutes min, como SYSTEM"
+$log += "  repeticao: intervalo $($rep.Interval), duracao $dur"
 
 # --- 3) primeira execucao ---------------------------------------------
 Start-ScheduledTask -TaskName $paths.TaskName

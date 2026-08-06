@@ -75,9 +75,18 @@ if ($svc.Status -ne 'Running') {
 # --- 3) recovery actions do SCM --------------------------------------
 # Sem isso, uma queda do servico so seria corrigida no proximo tique do
 # watchdog - ate 10 minutos de acesso remoto indisponivel.
+# sc.exe nao e cmdlet: ErrorActionPreference nao o alcanca e uma falha passaria
+# em silencio, deixando o servico sem recovery com o log dizendo o contrario.
 & sc.exe failure $paths.ServiceName reset= 0 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+$rc1 = $LASTEXITCODE
 & sc.exe failureflag $paths.ServiceName 1 | Out-Null
-$log += 'recovery do SCM: reiniciar 3x com 5s de intervalo, sem janela de reset'
+$rc2 = $LASTEXITCODE
+if ($rc1 -eq 0 -and $rc2 -eq 0) {
+    $log += 'recovery do SCM: reiniciar 3x com 5s de intervalo, sem janela de reset'
+} else {
+    $log += "AVISO: sc.exe falhou (failure=$rc1, failureflag=$rc2). O servico fica sem recovery"
+    $log += '  automatico - so o watchdog o traria de volta, e ate 10 min depois.'
+}
 
 $svc = Get-Service -Name $paths.ServiceName
 $log += "estado final: $($svc.Status) / $($svc.StartType)"
