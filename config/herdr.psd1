@@ -74,10 +74,10 @@
     }
 
     'ui.sound' = @{
-        # Audio atravessa a conexao do RustDesk e gasta banda para dizer o
-        # que o toast ja disse. Ligue se estiver com a janela em segundo
-        # plano e quiser aviso sem olhar.
-        enabled = $false
+        # Aviso sonoro quando o agente termina. O toast so serve se voce esta
+        # olhando a tela; o som atravessa a sessao do RustDesk e avisa com a
+        # janela em segundo plano - que e o caso comum aqui.
+        enabled = $true
     }
 
     session = @{
