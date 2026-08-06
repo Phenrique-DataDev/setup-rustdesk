@@ -163,6 +163,11 @@ $procs = @(Get-CimInstance Win32_Process -Filter "Name='rustdesk.exe'" -ErrorAct
 Test-Item 'processo do servico (sessao 0) ativo' ([bool](@($procs | Where-Object { $_.SessionId -eq 0 }).Count))
 foreach ($p in $procs) {
     $cmd = if ($p.CommandLine) { $p.CommandLine } else { '(sem acesso a linha de comando)' }
+    # 'rustdesk --password <senha>' e 'rustdesk --set-unlock-pin <pin>' carregam
+    # o segredo em claro na linha de comando. A janela e curta (o processo sai
+    # logo), mas se a verificacao cair dentro dela o segredo iria para a tela e
+    # para qualquer log que capture esta saida. Redigido antes de imprimir.
+    $cmd = $cmd -replace '(--password|--set-unlock-pin)\s+\S+', '$1 <REDIGIDO>'
     Write-Host "          PID $($p.ProcessId) sessao $($p.SessionId)  $cmd" -ForegroundColor DarkGray
 }
 

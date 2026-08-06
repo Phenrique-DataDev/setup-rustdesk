@@ -17,14 +17,21 @@ Numa máquina nova, é **um comando**, em PowerShell **como Administrador**:
 Ele executa 5 passos: instala o RustDesk → aplica as duas configs → watchdog → instala e
 configura o Herdr com o servidor no logon → verifica.
 
-Depois diga ao usuário para fazer o passo manual:
+Depois falta a **senha permanente**, que nenhum script inventa. Numa máquina zerada `-All`
+**termina com `[FALHA] senha ... gravada`** — isso é esperado, não é bug.
 
-> **Defina uma senha permanente na UI do RustDesk** (abrir RustDesk → Senha). Sem ela a
-> conexão com a tela bloqueada falha, e não existe caminho de linha de comando para isso.
-> Depois rode `.\Setup.ps1` de novo para confirmar.
+Ofereça as duas rotas, nesta ordem:
 
-Numa máquina zerada `-All` **termina com `[FALHA] senha ... gravada`** — isso é esperado,
-não é bug. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
+1. **UI do RustDesk → Senha** — exposição zero do segredo. Recomende esta por default.
+2. **`.\scripts\Set-RustDeskPassword.ps1`** — para automação. Pergunta sem eco, não toca
+   disco nem histórico, aplica via `rustdesk --password` (que grava por IPC e sincroniza os
+   dois perfis). Exige Administrador.
+
+Ao mencionar a rota 2, mencione junto o custo: `--password` recebe o segredo como
+argumento, visível em `Win32_Process.CommandLine` enquanto o processo roda. Não omita isso.
+
+**Nunca** peça a senha em texto claro num parâmetro, nem a escreva em arquivo, log ou
+mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
 
 ## Regras ao trabalhar aqui
 
@@ -33,8 +40,12 @@ não é bug. Não tente contornar editando `RustDesk.toml`: ele guarda hash e sa
   Administrador e mexem em serviço e configs.
 - **`-WhatIf` funciona** em `Set-RustDeskConfig.ps1`, `Set-HerdrConfig.ps1` e
   `Install-Herdr.ps1`. Use para mostrar o efeito antes de aplicar.
-- **Nunca versione `RustDesk.toml` / `RustDesk2.toml`** — carregam senha, salt e chaves do
-  dispositivo. Já estão no `.gitignore`; não os force.
+- **Nunca versione `RustDesk.toml` / `RustDesk2.toml`** — carregam hash de senha, salt e
+  chaves do dispositivo. Já estão no `.gitignore`; não os force com `git add -f`.
+- **Nunca imprima linha de comando de processo sem redigir** `--password` /
+  `--set-unlock-pin`. `Test-RustDeskSetup.ps1` já faz isso; mantenha se mexer ali.
+- Antes de commitar, confira que nenhum `.toml`, `.bak` ou `.log` entrou: eles são
+  ignorados, mas `git add -f` ou um caminho novo furam a regra.
 - **Configuração pessoal vai em `config/custom.psd1` e `config/herdr-custom.psd1`**, que
   têm precedência e são ignorados pelo git. Não edite os defaults para preferência local.
 - Testes: `.\tests\RustDeskToml.Tests.ps1` (usa arquivos temporários, não toca em

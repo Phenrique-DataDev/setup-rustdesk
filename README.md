@@ -35,15 +35,32 @@ powershell.exe -ExecutionPolicy Bypass -File .\Setup.ps1 -All
 
 ### O passo que nenhum script faz por você
 
-**Defina uma senha permanente na UI do RustDesk.** Com a tela bloqueada quem autentica é o
-serviço, e sem senha gravada a conexão falha mesmo com todas as opções corretas. A senha é
-definida pela interface (não há caminho de linha de comando), então numa máquina zerada
-`-All` termina com `[FALHA] senha ... gravada` até você fazê-lo:
+**Defina uma senha permanente.** Com a tela bloqueada quem autentica é o serviço, e sem
+senha gravada a conexão falha mesmo com todas as opções corretas. Numa máquina zerada
+`-All` termina com `[FALHA] senha ... gravada` até você fazê-lo — isso é esperado, não é
+bug. Nenhum script inventa a sua senha.
 
-1. Abra o RustDesk → **Senha** → defina uma senha fixa e forte.
-2. Rode `.\Setup.ps1` de novo (como Administrador, para conferir também o perfil do serviço).
+Duas rotas, com trade-off diferente:
 
-A verificação avisa explicitamente quando é só isso que falta.
+| Rota | Comando | Exposição do segredo |
+|---|---|---|
+| **UI** (recomendada para uma máquina) | RustDesk → **Senha** | nenhuma |
+| **Script** (para automação) | `.\scripts\Set-RustDeskPassword.ps1` | breve, na linha de comando do processo |
+
+O script pergunta a senha **sem eco**, nunca a escreve em disco, log ou histórico do
+PowerShell, e aplica via `rustdesk --password` — que grava por IPC, o mesmo caminho da UI,
+então os **dois** perfis ficam sincronizados. Exige Administrador.
+
+A ressalva honesta: `--password` recebe o segredo como argumento, e argumentos são visíveis
+a outros processos (`Win32_Process.CommandLine`) enquanto o processo roda. A janela é curta
+e o RustDesk não expõe API alternativa, mas se você quer exposição zero, use a UI. (A
+verificação deste repositório **redige** `--password` e `--set-unlock-pin` antes de imprimir
+linhas de comando, para não vazar num log de execução.)
+
+Depois, rode `.\Setup.ps1` de novo como Administrador para conferir também o perfil do
+serviço. A verificação avisa explicitamente quando é só a senha que falta.
+
+Editar o `RustDesk.toml` na mão **não** funciona: ele guarda hash e salt, não a senha.
 
 ---
 
@@ -77,6 +94,7 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | `.\Setup.ps1 -Configure` | Reaplica as opções nas duas configs do RustDesk | **sim** |
 | `.\Setup.ps1 -Watchdog` | Instala o watchdog e a tarefa agendada | **sim** |
 | `.\Setup.ps1 -Herdr` | Instala o Herdr, aplica a config e põe o servidor no logon | não |
+| `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
 | `.\tests\RustDeskToml.Tests.ps1` | Testes da biblioteca (em arquivos temporários) | não |
 
@@ -480,6 +498,7 @@ lib/RustDeskCommon.psm1         caminhos, elevação, controle do serviço
 lib/RustDeskToml.psm1           leitura/escrita do .toml preservando o formato
 scripts/Install-RustDesk.ps1    winget + serviço + recovery do SCM
 scripts/Set-RustDeskConfig.ps1  aplica as opções nas duas configs
+scripts/Set-RustDeskPassword.ps1  senha permanente, sem eco e sem histórico
 scripts/Install-Watchdog.ps1    watchdog + tarefa agendada
 scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
 scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
