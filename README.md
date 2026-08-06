@@ -1,17 +1,16 @@
 # setup-rustdesk
 
-Configura o [RustDesk](https://rustdesk.com) no Windows para acesso remoto confiável —
-incluindo o uso da função **Terminal com a tela bloqueada**, que é onde a configuração
-padrão costuma falhar.
+Configura a stack de acesso remoto no Windows — [RustDesk](https://rustdesk.com) para o
+transporte e [Herdr](https://herdr.dev) para o terminal — incluindo o uso da função
+**Terminal com a tela bloqueada**, que é onde a configuração padrão costuma falhar.
 
-Clone, rode um comando, e a máquina fica pronta: instalação, configuração das **duas**
-configs, watchdog e verificação automatizada.
+Clone, rode um comando, e a máquina fica pronta: instalação dos dois, configuração das
+**duas** configs do RustDesk, watchdog, servidor do Herdr subindo no logon e verificação
+automatizada de tudo.
 
-O escopo é o **acesso remoto de ponta a ponta**, não apenas o RustDesk. Na prática o
-RustDesk entrega o transporte e o [Herdr](https://herdr.dev) é o terminal usado dentro da
-sessão — por isso a configuração e as armadilhas dos dois estão documentadas aqui. Os
-scripts automatizam só a parte do RustDesk; o que é do Herdr está descrito para ser
-aplicado à mão. Veja [O terminal dentro da sessão](#o-terminal-dentro-da-sessão-herdr).
+O escopo é o **acesso remoto de ponta a ponta**, não apenas o RustDesk. O RustDesk entrega
+o transporte; o Herdr é o que mantém o trabalho vivo quando a conexão cai. `-All` cobre os
+dois. Veja [O terminal dentro da sessão](#o-terminal-dentro-da-sessão-herdr).
 
 ---
 
@@ -33,6 +32,35 @@ Se o Windows bloquear a execução dos scripts:
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File .\Setup.ps1 -All
 ```
+
+### O passo que nenhum script faz por você
+
+**Defina uma senha permanente.** Com a tela bloqueada quem autentica é o serviço, e sem
+senha gravada a conexão falha mesmo com todas as opções corretas. Numa máquina zerada
+`-All` termina com `[FALHA] senha ... gravada` até você fazê-lo — isso é esperado, não é
+bug. Nenhum script inventa a sua senha.
+
+Duas rotas, com trade-off diferente:
+
+| Rota | Comando | Exposição do segredo |
+|---|---|---|
+| **UI** (recomendada para uma máquina) | RustDesk → **Senha** | nenhuma |
+| **Script** (para automação) | `.\scripts\Set-RustDeskPassword.ps1` | breve, na linha de comando do processo |
+
+O script pergunta a senha **sem eco**, nunca a escreve em disco, log ou histórico do
+PowerShell, e aplica via `rustdesk --password` — que grava por IPC, o mesmo caminho da UI,
+então os **dois** perfis ficam sincronizados. Exige Administrador.
+
+A ressalva honesta: `--password` recebe o segredo como argumento, e argumentos são visíveis
+a outros processos (`Win32_Process.CommandLine`) enquanto o processo roda. A janela é curta
+e o RustDesk não expõe API alternativa, mas se você quer exposição zero, use a UI. (A
+verificação deste repositório **redige** `--password` e `--set-unlock-pin` antes de imprimir
+linhas de comando, para não vazar num log de execução.)
+
+Depois, rode `.\Setup.ps1` de novo como Administrador para conferir também o perfil do
+serviço. A verificação avisa explicitamente quando é só a senha que falta.
+
+Editar o `RustDesk.toml` na mão **não** funciona: ele guarda hash e salt, não a senha.
 
 ---
 
@@ -61,17 +89,27 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | Comando | O que faz | Admin |
 |---|---|---|
 | `.\Setup.ps1` | Só verifica. Não altera nada. | não |
-| `.\Setup.ps1 -All` | Instala + configura + watchdog + verifica | **sim** |
+| `.\Setup.ps1 -All` | RustDesk + watchdog + Herdr + verifica | **sim** |
 | `.\Setup.ps1 -Install` | Instala o RustDesk e registra o serviço | **sim** |
-| `.\Setup.ps1 -Configure` | Reaplica as opções nas duas configs | **sim** |
+| `.\Setup.ps1 -Configure` | Reaplica as opções nas duas configs do RustDesk | **sim** |
 | `.\Setup.ps1 -Watchdog` | Instala o watchdog e a tarefa agendada | **sim** |
+| `.\Setup.ps1 -Herdr` | Instala o Herdr, aplica a config e põe o servidor no logon | não |
+| `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
 | `.\tests\RustDeskToml.Tests.ps1` | Testes da biblioteca (em arquivos temporários) | não |
 
 \* a verificação roda sem elevação, mas as checagens da config do serviço aparecem como
-`[AVISO] requer Administrador` — o diretório é protegido.
+`[AVISO] requer Administrador` — o diretório é protegido. A parte do Herdr mora no perfil
+do usuário e é verificada por completo sem elevação.
 
-Opções úteis: `-IntervalMinutes 5` (frequência do watchdog), `-ConfigFile caminho.psd1`.
+Opções úteis: `-IntervalMinutes 5` (frequência do watchdog), `-ConfigFile caminho.psd1`
+(RustDesk), `-HerdrConfigFile caminho.psd1`, `-SkipHerdrInstall` (só configura um Herdr já
+instalado).
+
+O passo do Herdr **não** eleva: ele instala no perfil do usuário e registra uma tarefa do
+próprio usuário. Rodar `-All` como Administrador funciona porque o UAC eleva o *mesmo*
+usuário — mas "executar como outro usuário administrador" instalaria o Herdr no perfil
+errado.
 
 ---
 
@@ -117,6 +155,11 @@ C:\ProgramData\RustDesk\
   rustdesk-watchdog.ps1              watchdog materializado do template
   watchdog.log                       rotaciona em 1 MB, mantém 2000 linhas
 Tarefa "RustDeskWatchdog"            SYSTEM, no boot + a cada 10 min
+
+%LOCALAPPDATA%\Programs\Herdr\       binário (instalador oficial do herdr.dev)
+%APPDATA%\herdr\config.toml          config aplicada de config/herdr*.psd1
+%APPDATA%\herdr\start-herdr-server.ps1   launcher materializado (não editar)
+Tarefa "HerdrServer"                 usuário, no logon, sem limite de duração
 ```
 
 Duas camadas de proteção, de propósito: as **recovery actions do SCM** cobrem quedas do
@@ -279,11 +322,52 @@ também para a conexão gráfica.
 Combinado com a configuração da tela bloqueada deste repositório, o resultado é: a máquina
 aceita a conexão sem ninguém logado, e o que estava rodando continua rodando.
 
+### Instalação e autostart
+
+`.\Setup.ps1 -Herdr` (incluído no `-All`) faz os três passos: instala o Herdr se faltar,
+aplica a configuração e registra o servidor para subir no logon.
+
+**A instalação usa o instalador oficial** (`https://herdr.dev/install.ps1`), não o winget.
+O winget tem um pacote `herdr`, mas é `khanhtd36.herdr-khanhtd36` — um fork de terceiro que
+se declara *"Unofficial fork… Not affiliated with or endorsed by the original project"*.
+Binário de terceiro numa máquina configurada para acesso remoto irrestrito é uma decisão
+que este repositório não toma por você.
+
+#### O que isso significa em confiança
+
+Instalar assim é **download-and-execute**: o que `herdr.dev` servir, roda. Vale saber
+exatamente o que protege e o que não protege:
+
+- O `install.ps1` **não é assinado** (Authenticode: `NotSigned`), então não há assinatura a
+  validar.
+- Ele **exige e confere o SHA-256 do binário** que baixa, com o digest vindo de
+  `herdr.dev/latest.json`. O binário final não é aceito sem checksum.
+- Logo, a confiança se concentra em **TLS + o domínio herdr.dev**.
+
+O script baixa para um arquivo temporário, registra o SHA-256 do que baixou e só então
+executa — em vez de `irm | iex`, que não deixa rastro do que rodou. O hash **não vem
+pinado** de propósito: `install.ps1` é um script rolling, e um hash fixo quebraria a
+instalação em toda máquina nova a cada release do Herdr. Quem opera uma frota e quer esse
+controle usa `-ExpectedSha256 <hash>` e assume atualizar o valor.
+
+**O autostart é uma tarefa agendada `HerdrServer`**, no logon do usuário, `Interactive` /
+`Limited`, sem limite de duração (o default de 3 dias mataria o servidor numa máquina que
+fica ligada). Ela chama um launcher materializado em
+`%APPDATA%\herdr\start-herdr-server.ps1` — fora do repositório de propósito, como o
+watchdog: uma tarefa apontando para o clone quebra quando a pasta é movida. O launcher
+checa `herdr status server` antes de subir, então disparar a tarefa com um servidor já no
+ar não faz nada.
+
+Por que `Interactive` e não SYSTEM: o servidor precisa viver na sessão do usuário
+(`SessionId 1`) para os agentes herdarem esse contexto. Na sessão 0 ele não serviria para
+nada aqui.
+
 ### Configuração recomendada
 
 As opções vivem em `config/herdr.psd1` e são aplicadas por
 `scripts\Set-HerdrConfig.ps1` (não precisa de Administrador). O destino é
-`%APPDATA%\herdr\config.toml`.
+`%APPDATA%\herdr\config.toml`. Copie para `herdr-custom.psd1` para personalizar sem sujar
+o repositório — ele tem precedência e está no `.gitignore`.
 
 A configuração deste repositório parte de uma premissa concreta: **acesso pelo Terminal
 embutido do RustDesk, de outras redes, incluindo Android.** Nesse transporte a roda do
@@ -318,7 +402,7 @@ Sobre `[experimental] pane_history`: é experimental e vem desligado. Ligamos aq
 queda de conexão em rede alheia é o caso comum, não a exceção — se preferir o
 comportamento oficial, remova a seção.
 
-Aplique:
+Aplique (só a config, sem mexer em instalação nem autostart):
 
 ```powershell
 pwsh -File .\scripts\Set-HerdrConfig.ps1
@@ -408,12 +492,17 @@ o histórico da conversa, use o `Show-AgentTranscript.ps1`.
 
 ```
 Setup.ps1                       orquestrador
-config/default.psd1             opções aplicadas (copie para custom.psd1)
+config/default.psd1             opções do RustDesk (copie para custom.psd1)
+config/herdr.psd1               opções do Herdr (copie para herdr-custom.psd1)
 lib/RustDeskCommon.psm1         caminhos, elevação, controle do serviço
 lib/RustDeskToml.psm1           leitura/escrita do .toml preservando o formato
 scripts/Install-RustDesk.ps1    winget + serviço + recovery do SCM
 scripts/Set-RustDeskConfig.ps1  aplica as opções nas duas configs
+scripts/Set-RustDeskPassword.ps1  senha permanente, sem eco e sem histórico
 scripts/Install-Watchdog.ps1    watchdog + tarefa agendada
+scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
+scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
+scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
 tests/RustDeskToml.Tests.ps1    10 testes, sem tocar em instalação real
@@ -425,7 +514,10 @@ tests/RustDeskToml.Tests.ps1    10 testes, sem tocar em instalação real
 
 - Windows 10/11
 - Windows PowerShell 5.1 (já vem no Windows) ou PowerShell 7+
-- Privilégios de Administrador para instalar e configurar
+- Privilégios de Administrador para instalar e configurar o RustDesk (o passo do Herdr não
+  eleva)
+- Acesso à internet para os dois instaladores (winget para o RustDesk, `herdr.dev` para o
+  Herdr). Sem ele, use `-SkipInstall` / `-SkipHerdrInstall` sobre instalações existentes.
 - `winget` para a instalação automática — sem ele, instale o RustDesk manualmente e use
   `.\Setup.ps1 -Install -SkipInstall` para só registrar o serviço
 
@@ -464,6 +556,14 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
 ---
 
 ## Limite conhecido
+
+Duas coisas não são cobertas por verificação automática.
+
+**O autostart do Herdr no logon nunca foi observado subindo um servidor do zero.** A tarefa
+`HerdrServer` foi verificada disparando à mão com um servidor já no ar: executou com
+`LastTaskResult: 0` e o guard a fez sair sem tocar no servidor — o que prova o registro, o
+launcher e o caminho de execução, mas não o caso "sem servidor". Testar esse caso exige
+derrubar o servidor em uso. Confirme com um logoff/logon e `herdr status server`.
 
 Nenhuma verificação automatizada cobre o caminho real de ponta a ponta: **conectar de
 outra máquina com a tela bloqueada e abrir o Terminal**. As checagens confirmam que a
