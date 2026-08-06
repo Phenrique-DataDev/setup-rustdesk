@@ -29,6 +29,12 @@
 .PARAMETER NoStart
     Nao sobe o servidor agora; ele subira no proximo logon.
 
+.PARAMETER ExpectedSha256
+    SHA-256 esperado do install.ps1. Sem isto o script apenas registra o hash
+    do que baixou. Com isto, uma divergencia aborta a instalacao - util para
+    frota, ao custo de atualizar o valor a cada release do Herdr, porque o
+    install.ps1 e um script rolling.
+
 .EXAMPLE
     .\scripts\Install-Herdr.ps1
     Instala se faltar, registra o autostart e sobe o servidor.
@@ -41,7 +47,8 @@
 param(
     [switch]$SkipInstall,
     [switch]$NoAutostart,
-    [switch]$NoStart
+    [switch]$NoStart,
+    [string]$ExpectedSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,15 +73,50 @@ if ($paths.Installed) {
 } else {
     $log += 'instalando o Herdr pelo instalador oficial (https://herdr.dev/install.ps1)...'
     if ($PSCmdlet.ShouldProcess('herdr.dev/install.ps1', 'baixar e executar o instalador')) {
-        # O instalador e executado em um powershell.exe separado, como a
-        # documentacao do Herdr descreve: ele mexe no PATH do usuario e no
-        # layout de %LOCALAPPDATA%\Programs\Herdr, e um processo proprio
-        # mantem isso fora do escopo desta sessao.
-        $p = Start-Process -FilePath 'powershell.exe' -Wait -PassThru -NoNewWindow -ArgumentList @(
-            '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-            '-Command', 'irm https://herdr.dev/install.ps1 | iex'
-        )
-        if ($p.ExitCode -ne 0) { throw "o instalador do Herdr retornou codigo $($p.ExitCode)" }
+        # --- cadeia de confianca, para decidir com o fato na mao ----------
+        # Isto e download-and-execute: o que herdr.dev servir, roda. O
+        # install.ps1 NAO e assinado (Authenticode: NotSigned), entao nao ha
+        # assinatura a validar. Ele proprio, porem, exige e confere o SHA-256
+        # do binario que baixa, com o digest vindo de herdr.dev/latest.json.
+        # Ou seja: a confianca se concentra em TLS + herdr.dev, e o binario
+        # final nao e aceito sem checksum.
+        #
+        # O hash do install.ps1 nao vem pinado aqui de proposito: e um script
+        # rolling, e um hash fixo quebraria a instalacao em toda maquina nova
+        # a cada release do Herdr - falha ruidosa e frequente para mitigar um
+        # comprometimento do proprio fornecedor. Quem opera uma frota e quer
+        # esse controle usa -ExpectedSha256 e assume atualizar o valor.
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "herdr-install-$([guid]::NewGuid().ToString('N')).ps1"
+        try {
+            # Gravar em disco antes de executar (em vez de 'irm | iex') deixa o
+            # que rodou auditavel e permite falhar cedo se vier uma pagina de
+            # erro em vez do script.
+            Invoke-WebRequest -Uri 'https://herdr.dev/install.ps1' -OutFile $tmp -UseBasicParsing
+
+            $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash
+            $log += "instalador baixado: $tmp"
+            $log += "  sha256: $sha"
+
+            if ($ExpectedSha256 -and $sha -ne $ExpectedSha256.Trim().ToUpperInvariant()) {
+                throw "o SHA-256 do instalador nao confere. Esperado $ExpectedSha256, obtido $sha."
+            }
+
+            $conteudo = Get-Content -LiteralPath $tmp -Raw
+            if ($conteudo -notmatch 'Herdr') {
+                throw 'o conteudo baixado nao parece o instalador do Herdr. Verifique a rede (portal cativo/proxy).'
+            }
+
+            # O instalador roda em um powershell.exe separado, como a
+            # documentacao do Herdr descreve: ele mexe no PATH do usuario e no
+            # layout de %LOCALAPPDATA%\Programs\Herdr, e um processo proprio
+            # mantem isso fora do escopo desta sessao.
+            $p = Start-Process -FilePath 'powershell.exe' -Wait -PassThru -NoNewWindow -ArgumentList @(
+                '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tmp
+            )
+            if ($p.ExitCode -ne 0) { throw "o instalador do Herdr retornou codigo $($p.ExitCode)" }
+        } finally {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
 
         $paths = Get-HerdrPaths
         if (-not $paths.Installed) {

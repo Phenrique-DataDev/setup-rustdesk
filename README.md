@@ -309,11 +309,28 @@ aceita a conexão sem ninguém logado, e o que estava rodando continua rodando.
 `.\Setup.ps1 -Herdr` (incluído no `-All`) faz os três passos: instala o Herdr se faltar,
 aplica a configuração e registra o servidor para subir no logon.
 
-**A instalação usa o instalador oficial** (`irm https://herdr.dev/install.ps1 | iex`), não
-o winget. O winget tem um pacote `herdr`, mas é `khanhtd36.herdr-khanhtd36` — um fork de
-terceiro que se declara *"Unofficial fork… Not affiliated with or endorsed by the original
-project"*. Binário de terceiro numa máquina configurada para acesso remoto irrestrito é uma
-decisão que este repositório não toma por você.
+**A instalação usa o instalador oficial** (`https://herdr.dev/install.ps1`), não o winget.
+O winget tem um pacote `herdr`, mas é `khanhtd36.herdr-khanhtd36` — um fork de terceiro que
+se declara *"Unofficial fork… Not affiliated with or endorsed by the original project"*.
+Binário de terceiro numa máquina configurada para acesso remoto irrestrito é uma decisão
+que este repositório não toma por você.
+
+#### O que isso significa em confiança
+
+Instalar assim é **download-and-execute**: o que `herdr.dev` servir, roda. Vale saber
+exatamente o que protege e o que não protege:
+
+- O `install.ps1` **não é assinado** (Authenticode: `NotSigned`), então não há assinatura a
+  validar.
+- Ele **exige e confere o SHA-256 do binário** que baixa, com o digest vindo de
+  `herdr.dev/latest.json`. O binário final não é aceito sem checksum.
+- Logo, a confiança se concentra em **TLS + o domínio herdr.dev**.
+
+O script baixa para um arquivo temporário, registra o SHA-256 do que baixou e só então
+executa — em vez de `irm | iex`, que não deixa rastro do que rodou. O hash **não vem
+pinado** de propósito: `install.ps1` é um script rolling, e um hash fixo quebraria a
+instalação em toda máquina nova a cada release do Herdr. Quem opera uma frota e quer esse
+controle usa `-ExpectedSha256 <hash>` e assume atualizar o valor.
 
 **O autostart é uma tarefa agendada `HerdrServer`**, no logon do usuário, `Interactive` /
 `Limited`, sem limite de duração (o default de 3 dias mataria o servidor numa máquina que
