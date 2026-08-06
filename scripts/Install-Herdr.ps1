@@ -191,6 +191,13 @@ if (`$status -match '(?m)^\s*status:\s*running') { exit 0 }
                 -Description 'Sobe o servidor headless do Herdr no logon (setup-rustdesk).' `
                 -Force | Out-Null
 
+            # Confirmar em vez de afirmar. Esta tarefa e do proprio usuario,
+            # entao Get-ScheduledTask a enxerga sem elevacao - diferente das de
+            # SYSTEM, que voltam vazias e nao serviriam de prova aqui.
+            $reg = Get-ScheduledTask -TaskName $paths.TaskName -ErrorAction SilentlyContinue
+            if (-not $reg) {
+                throw "a tarefa '$($paths.TaskName)' nao existe apos o registro."
+            }
             $log += "tarefa '$($paths.TaskName)' registrada: 'herdr server' no logon de $usuario"
         } catch {
             $log += "FALHA ao registrar o autostart: $($_.Exception.Message)"

@@ -71,8 +71,16 @@ if ($svc -and $svc.Status -ne 'Running') {
 
 if ($svc -and $svc.StartType -ne 'Automatic') {
     Write-Log "StartType incorreto ($($svc.StartType)). Corrigindo..."
-    Set-Service -Name rustdesk -StartupType Automatic
-    Write-Log 'StartType corrigido para Automatic.'
+    Set-Service -Name rustdesk -StartupType Automatic -ErrorAction SilentlyContinue
+    # Reconsultar em vez de anunciar: este script roda como SYSTEM, sem
+    # ninguem olhando, e o log e a unica evidencia. Um "corrigido" que nao
+    # corrigiu esconde justamente a falha que o watchdog existe para pegar.
+    $novo = (Get-Service -Name rustdesk -ErrorAction SilentlyContinue).StartType
+    if ($novo -eq 'Automatic') {
+        Write-Log 'StartType corrigido para Automatic.'
+    } else {
+        Write-Log "ERRO: StartType continua $novo apos Set-Service."
+    }
 }
 
 foreach ($cfg in $cfgFiles) {
