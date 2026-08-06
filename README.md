@@ -302,7 +302,7 @@ redraw_on_focus_gained = true         # a superfície corrompe mais em sessão r
 delivery = "herdr"                    # toast dentro da TUI — atravessa o transporte
 
 [ui.sound]
-enabled = false                       # áudio gasta banda para dizer o que o toast já diz
+enabled = false                       # o player de som do Herdr no Windows está quebrado (ver abaixo)
 
 [session]
 resume_agents_on_restore = true       # retoma os agentes após restart do servidor
@@ -332,6 +332,47 @@ herdr server reload-config
 
 O comando responde `"status":"applied"` com `diagnostics` vazio quando o arquivo é válido
 — se houver erro de sintaxe, ele aparece ali em vez de derrubar o servidor.
+
+#### Som do Herdr não toca no Windows
+
+`[ui.sound] enabled` está `false` de propósito: **não é preferência, é um bug do Herdr.**
+Verificado no Herdr 0.7.2-preview, Windows 11.
+
+O Herdr não toca o mp3 no próprio processo — ele spawna
+
+```
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command <script>
+```
+
+e esse script usa `System.Windows.Media.MediaPlayer`. Esse tipo é do WPF e sinaliza
+`MediaOpened`/`MediaEnded` através de um *dispatcher*, que só entrega eventos enquanto
+alguém bombeia a fila de mensagens. Num PowerShell de console ninguém bombeia: o laço de
+espera roda até o deadline de 15 s, o `Play()` é chamado com o prazo já vencido e o
+`Close()` vem em seguida — o som é cortado antes de sair. O script termina com
+`throw 'sound playback timed out'`, e o Herdr registra:
+
+```
+WARN herdr::sound: sound playback failed sound=Done err=player exited with exit code: 1
+```
+
+Onde conferir, se quiser reproduzir: `%APPDATA%\herdr\herdr-client.log`. O log do
+*servidor* mostra a notificação como `outcome="ok"` — quem falha é o cliente, então olhar
+só o servidor engana.
+
+Isso é independente do RustDesk: o áudio da transmissão funciona (confirmado com áudio de
+navegador na mesma sessão). Nenhuma opção de configuração contorna — `ui.sound.path` troca
+o arquivo, não o player. Também não é ExecutionPolicy: o script já roda com `Bypass`.
+
+Se quiser aviso sonoro assim mesmo, a rota que funciona em console é o `SoundPlayer`, que
+é síncrono e não depende de dispatcher — chamado por fora do Herdr, por exemplo num hook
+`Stop` do Claude Code:
+
+```powershell
+[System.Media.SoundPlayer]::new('C:\Windows\Media\Alarm01.wav').PlaySync()
+```
+
+Verificado tocando de verdade e chegando pelo loopback do RustDesk. Este repositório não
+instala esse hook — fica registrado como opção.
 
 Duas ressalvas que custam tempo:
 

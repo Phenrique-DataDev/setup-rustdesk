@@ -74,10 +74,18 @@
     }
 
     'ui.sound' = @{
-        # Aviso sonoro quando o agente termina. O toast so serve se voce esta
-        # olhando a tela; o som atravessa a sessao do RustDesk e avisa com a
-        # janela em segundo plano - que e o caso comum aqui.
-        enabled = $true
+        # Desligado porque nao funciona: o player de som do Herdr no Windows
+        # esta quebrado (ver README, "Som do Herdr nao toca no Windows"). Ele
+        # spawna um powershell.exe que usa System.Windows.Media.MediaPlayer, e
+        # esse tipo do WPF depende de um dispatcher bombeando mensagens para
+        # sinalizar MediaOpened/MediaEnded. Num console nao ha esse pump: a
+        # espera consome os 15s do deadline, o Play() acontece com o prazo ja
+        # vencido e o Close() vem logo atras - nao sai som. O log registra
+        # 'sound playback failed ... exit code: 1'.
+        #
+        # Deixar ligado so gera WARN no log e promete um aviso que nao existe.
+        # 'ui.sound.path' nao ajuda: troca o arquivo, nao o player.
+        enabled = $false
     }
 
     session = @{
