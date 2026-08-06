@@ -267,6 +267,49 @@ It 'chave da secao pai nao vaza para dentro da subtabela' {
     Assert-Equal 'false' (Get-TomlSectionValue -Path $f -Section 'ui' -Key 'pane_gaps')
 }
 
+Write-Host ''
+Write-Host '=== Testes: -WhatIf nao toca o disco ===' -ForegroundColor Cyan
+
+It '-WhatIf nao grava, nao cria backup e reporta Changed' {
+    $f = New-TempToml -Lines $baseToml; $script:tmpFiles += $f
+    $antes = [System.IO.File]::ReadAllText($f)
+
+    $r = Set-TomlOption -Path $f -Options @{ 'enable-terminal' = 'N' } -WhatIf
+
+    Assert-True (-not (Test-Path "$f.bak")) 'backup foi criado sob -WhatIf'
+    Assert-Equal $antes ([System.IO.File]::ReadAllText($f))
+    Assert-True $r.Changed 'Changed deveria continuar reportando o que mudaria'
+}
+
+It '-WhatIf em secoes nomeadas tambem nao toca o disco' {
+    $f = New-TempToml -Lines $herdrToml; $script:tmpFiles += $f
+    $antes = [System.IO.File]::ReadAllText($f)
+
+    Set-TomlSectionValue -Path $f -Sections @{ ui = @{ mouse_capture = $false } } -WhatIf | Out-Null
+
+    Assert-True (-not (Test-Path "$f.bak")) 'backup foi criado sob -WhatIf'
+    Assert-Equal $antes ([System.IO.File]::ReadAllText($f))
+}
+
+It '-WhatIf com -CreateIfMissing nao cria o arquivo' {
+    $f = Join-Path ([System.IO.Path]::GetTempPath()) ("herdr-wi-" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".toml")
+    $script:tmpFiles += $f
+
+    Set-TomlSectionValue -Path $f -Sections @{ ui = @{ mouse_capture = $false } } `
+                         -CreateIfMissing -WhatIf | Out-Null
+
+    Assert-True (-not (Test-Path $f)) 'arquivo foi criado sob -WhatIf'
+}
+
+It 'sem alteracao a fazer, nao cria backup' {
+    # backup de arquivo que nao vai mudar so gera lixo ao lado do original
+    $f = New-TempToml -Lines $herdrToml; $script:tmpFiles += $f
+    $r = Set-TomlSectionValue -Path $f -Sections @{ advanced = @{ scrollback_limit_bytes = 1024 } }
+
+    Assert-True (-not $r.Changed) 'nada deveria mudar'
+    Assert-True (-not (Test-Path "$f.bak")) 'backup criado sem necessidade'
+}
+
 # limpeza
 $tmpFiles | Sort-Object -Unique | ForEach-Object { Remove-Item $_ -Force -ErrorAction SilentlyContinue }
 

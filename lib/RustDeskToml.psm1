@@ -98,11 +98,6 @@ function Set-TomlOption {
 
     $original = [System.IO.File]::ReadAllText($Path)
 
-    if (-not $NoBackup) {
-        Copy-Item -LiteralPath $Path -Destination "$Path.bak" -Force
-        $actions += "backup: $Path.bak"
-    }
-
     # Get-Content descarta o BOM na leitura; e a regravacao que o tira do disco.
     $lines = New-Object 'System.Collections.Generic.List[string]'
     foreach ($l in @(Get-Content -LiteralPath $Path)) { [void]$lines.Add($l) }
@@ -138,7 +133,13 @@ function Set-TomlOption {
     $changed = ($newText -ne $original)
 
     if ($changed) {
+        # o backup vive aqui dentro de proposito: -WhatIf nao pode tocar no
+        # disco, e backup de arquivo que nao vai mudar so gera lixo
         if ($PSCmdlet.ShouldProcess($Path, 'gravar RustDesk2.toml')) {
+            if (-not $NoBackup) {
+                Copy-Item -LiteralPath $Path -Destination "$Path.bak" -Force
+                $actions += "backup: $Path.bak"
+            }
             Write-TomlFile -Path $Path -Lines $lines.ToArray()
         }
     } else {
@@ -233,36 +234,29 @@ function Set-TomlSectionValue {
     $actions    = @()
     $bomRemoved = $false
 
-    if (-not (Test-Path -LiteralPath $Path)) {
-        if (-not $CreateIfMissing) {
-            return [PSCustomObject]@{
-                Path = $Path; Changed = $false; BomRemoved = $false
-                Actions = @('arquivo nao existe - nada a fazer'); Missing = $true
-            }
+    # O arquivo ausente e resolvido em memoria: criar em disco aqui faria
+    # -WhatIf deixar rastro. A criacao real acontece junto da gravacao.
+    $existe = Test-Path -LiteralPath $Path
+    if (-not $existe -and -not $CreateIfMissing) {
+        return [PSCustomObject]@{
+            Path = $Path; Changed = $false; BomRemoved = $false
+            Actions = @('arquivo nao existe - nada a fazer'); Missing = $true
         }
-        $dir = Split-Path -Parent $Path
-        if ($dir -and -not (Test-Path -LiteralPath $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            $actions += "diretorio criado: $dir"
-        }
-        Write-TomlFile -Path $Path -Lines @()
-        $actions += 'arquivo criado'
     }
 
-    if (Test-TomlBom -Path $Path) {
+    if ($existe -and (Test-TomlBom -Path $Path)) {
         $bomRemoved = $true
         $actions += 'BOM UTF-8 detectado - removido na regravacao'
     }
 
-    $original = [System.IO.File]::ReadAllText($Path)
-
-    if (-not $NoBackup) {
-        Copy-Item -LiteralPath $Path -Destination "$Path.bak" -Force
-        $actions += "backup: $Path.bak"
-    }
+    $original = if ($existe) { [System.IO.File]::ReadAllText($Path) } else { '' }
 
     $lines = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($l in @(Get-Content -LiteralPath $Path)) { [void]$lines.Add($l) }
+    if ($existe) {
+        foreach ($l in @(Get-Content -LiteralPath $Path)) { [void]$lines.Add($l) }
+    } else {
+        $actions += 'arquivo nao existe - sera criado'
+    }
 
     foreach ($secao in $Sections.Keys) {
         # limites da secao: do cabecalho ate o proximo [algo] ou o fim
@@ -310,7 +304,19 @@ function Set-TomlSectionValue {
     $changed = ($newText -ne $original)
 
     if ($changed) {
+        # mesmo criterio de Set-TomlOption: nada em disco sob -WhatIf, e sem
+        # backup quando o arquivo nao vai mudar
         if ($PSCmdlet.ShouldProcess($Path, 'gravar config.toml')) {
+            $dir = Split-Path -Parent $Path
+            if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                $actions += "diretorio criado: $dir"
+            }
+            # arquivo novo nao tem o que preservar
+            if (-not $NoBackup -and $existe) {
+                Copy-Item -LiteralPath $Path -Destination "$Path.bak" -Force
+                $actions += "backup: $Path.bak"
+            }
             Write-TomlFile -Path $Path -Lines $lines.ToArray()
         }
     } else {
