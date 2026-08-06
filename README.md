@@ -169,6 +169,39 @@ todos os indicadores verdes).
 
 ---
 
+## Tela bloqueada não é o mesmo que logoff
+
+Esta é a distinção mais fácil de errar do repositório, e ela decide se o Terminal funciona.
+
+| Estado da máquina | Área de trabalho | Terminal do RustDesk |
+|---|---|---|
+| **Tela bloqueada** (`Win+L`) | funciona | **funciona** |
+| **Logoff / ninguém logado** | funciona (tela de logon) | **recusa** |
+
+Com `Win+L` a sessão do usuário continua existindo (`SessionId 1`), apenas bloqueada — o
+Terminal se anexa a ela normalmente. Com **logoff** a sessão deixa de existir, e o Terminal
+não tem a que se anexar. O erro é explícito:
+
+```
+Erro de login
+No active console user logged on, please connect and logon first.
+```
+
+Isso **não é defeito de configuração**: nenhuma opção deste repositório, do RustDesk ou do
+Herdr faz o Terminal funcionar sem sessão. O caminho é conectar pela **área de trabalho
+remota**, fazer logon na tela de logon (é para isso que serve
+`allow-logon-screen-password = 'Y'`) e só então usar o Terminal.
+
+Consequência prática para o Herdr: como a tarefa `HerdrServer` dispara **no logon**, uma
+máquina recém-iniciada e sem ninguém logado não tem servidor Herdr no ar — e nem teria como
+alcançá-lo pelo Terminal. Faça o logon primeiro; o servidor sobe junto.
+
+**Verificado em 2026-08-06** (Windows 11 Pro 26200, RustDesk 1.4.9, cliente Android): após
+`shutdown /l`, a conexão de vídeo subiu normalmente e o Terminal recusou com a mensagem
+acima. Depois do logon, ambos funcionaram.
+
+---
+
 ## O que o Terminal consegue fazer com a tela bloqueada
 
 Com a tela bloqueada você perde **os olhos e as mãos** da máquina, não o resto. O
@@ -320,7 +353,10 @@ mesmo motivo pelo qual se usa `tmux` sobre SSH, com a diferença de que aqui iss
 também para a conexão gráfica.
 
 Combinado com a configuração da tela bloqueada deste repositório, o resultado é: a máquina
-aceita a conexão sem ninguém logado, e o que estava rodando continua rodando.
+aceita a conexão com a **tela bloqueada**, e o que estava rodando continua rodando.
+
+Note o limite, que é preciso: *tela bloqueada*, não *sem ninguém logado*. Veja
+[Tela bloqueada não é o mesmo que logoff](#tela-bloqueada-não-é-o-mesmo-que-logoff).
 
 ### Instalação e autostart
 
@@ -557,13 +593,22 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
 
 ## Limite conhecido
 
-Duas coisas não são cobertas por verificação automática.
+**O autostart do Herdr foi validado em 2026-08-06**, com logoff real. Registrado aqui
+porque a evidência é o que dá confiança, não a afirmação:
 
-**O autostart do Herdr no logon nunca foi observado subindo um servidor do zero.** A tarefa
-`HerdrServer` foi verificada disparando à mão com um servidor já no ar: executou com
-`LastTaskResult: 0` e o guard a fez sair sem tocar no servidor — o que prova o registro, o
-launcher e o caminho de execução, mas não o caso "sem servidor". Testar esse caso exige
-derrubar o servidor em uso. Confirme com um logoff/logon e `herdr status server`.
+| | Antes do logoff | Depois do logon |
+|---|---|---|
+| Logon da sessão | — | 20:00:50 |
+| `HerdrServer` disparou | 16:38:46 (manual) | **20:00:50** |
+| PID do servidor | 2908 (15:06) | **22912 (20:00:51)** |
+| `herdr status server` | — | `running` |
+
+O servidor antigo morreu com o logoff e um novo nasceu **1s após a tarefa disparar**,
+antes de qualquer cliente ser aberto.
+
+Sobre o `LastTaskResult` dessa tarefa: `267009` (`0x41301`, `SCHED_S_TASK_RUNNING`) é o
+valor **saudável** — `herdr server` roda em foreground, então a tarefa fica ativa enquanto
+o servidor vive. Um `0` ali significaria que ele saiu.
 
 Nenhuma verificação automatizada cobre o caminho real de ponta a ponta: **conectar de
 outra máquina com a tela bloqueada e abrir o Terminal**. As checagens confirmam que a
@@ -594,5 +639,9 @@ Se falhar mesmo com tudo verde, olhe os logs:
 
 Um sintoma já visto: `Failed to start ipc_cm server at path \\.\pipe\RustDesk\query_cm:
 Acesso negado`. Indica um processo `--cm` órfão segurando o named pipe. A verificação
-avisa quando encontra mais de um. Testar com **logoff** em vez de apenas bloquear ajuda
-a isolar: sem sessão de usuário não existe `--cm` concorrente.
+avisa quando encontra mais de um.
+
+Não tente isolar isso com **logoff**: sem sessão de usuário o Terminal recusa a conexão de
+saída (ver [Tela bloqueada não é o mesmo que logoff](#tela-bloqueada-não-é-o-mesmo-que-logoff)),
+e você troca um sintoma por outro em vez de isolar. Para limpar um `--cm` órfão, feche a
+sessão remota, confirme com a verificação que sobrou só um, e reconecte.
