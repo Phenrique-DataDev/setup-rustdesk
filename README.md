@@ -576,6 +576,16 @@ Terminal** — a sessão console permaneceu `Ativo`, o serviço `rustdesk` segui
 os comandos continuaram executando sem reconexão. É um único ponto de dado, de uma
 máquina configurada por este repositório; repita na sua.
 
+**Revalidado em 2026-08-06**, na mesma máquina, depois de a configuração passar a ser
+aplicada por `-All` (as 28 chaves do RustDesk — 14 × 2 perfis — verificadas com elevação,
+`allow-remote-config-modification` corrigido para `'N'` nos dois): o teste de tela
+bloqueada **voltou a funcionar**. Continua sendo um ponto de dado de uma única máquina.
+
+O que este teste **não** cobriu, para não se confundir depois: houve bloqueio e
+desbloqueio de tela, não logoff. O processo do servidor Herdr seguiu sendo o mesmo de
+antes do teste e a tarefa `HerdrServer` não foi disparada por ele — então o autostart
+continua sem observação real, como descrito acima.
+
 Se falhar mesmo com tudo verde, olhe os logs:
 
 ```powershell
