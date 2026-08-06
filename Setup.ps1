@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Configura o RustDesk no Windows para acesso remoto confiavel, incluindo
-    o Terminal com a tela bloqueada.
+    Configura a stack de acesso remoto no Windows - RustDesk (transporte) e
+    Herdr (terminal persistente) - incluindo o Terminal com a tela bloqueada.
 
 .DESCRIPTION
     Sem parametros, roda apenas a verificacao (Test), que nao altera nada.
@@ -13,11 +13,17 @@
 
 .EXAMPLE
     .\Setup.ps1 -All
-    Instala, configura, instala o watchdog e verifica. Exige Administrador.
+    Instala e configura o RustDesk, instala o watchdog, instala e configura o
+    Herdr com o servidor subindo no logon, e verifica. Exige Administrador.
 
 .EXAMPLE
     .\Setup.ps1 -Configure
-    So reaplica as opcoes das configs. Exige Administrador.
+    So reaplica as opcoes das configs do RustDesk. Exige Administrador.
+
+.EXAMPLE
+    .\Setup.ps1 -Herdr
+    So a metade Herdr: instala, configura e poe o servidor no logon.
+    NAO precisa de Administrador.
 
 .LINK
     README.md
@@ -28,20 +34,24 @@ param(
     [switch]$Install,
     [switch]$Configure,
     [switch]$Watchdog,
+    [switch]$Herdr,
     [switch]$Test,
     [string]$ConfigFile,
+    [string]$HerdrConfigFile,
     [int]$IntervalMinutes = 10,
+    [switch]$SkipHerdrInstall,
     [switch]$ShowLogs
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\RustDeskCommon.psm1') -Force
 
-if ($All) { $Install = $Configure = $Watchdog = $Test = $true }
+if ($All) { $Install = $Configure = $Watchdog = $Herdr = $Test = $true }
 
 # nada pedido: so verifica, que e a acao segura
-if (-not ($Install -or $Configure -or $Watchdog -or $Test)) { $Test = $true }
+if (-not ($Install -or $Configure -or $Watchdog -or $Herdr -or $Test)) { $Test = $true }
 
+# o passo do Herdr fica de fora: ele mora no perfil do usuario e nao eleva
 $precisaAdmin = $Install -or $Configure -or $Watchdog
 if ($precisaAdmin -and -not (Test-Elevated)) {
     Write-Host ''
@@ -61,26 +71,38 @@ function Write-Passo($titulo) {
 }
 
 if ($Install) {
-    Write-Passo '1/4  Instalando RustDesk e registrando o servico'
+    Write-Passo '1/5  Instalando RustDesk e registrando o servico'
     & (Join-Path $PSScriptRoot 'scripts\Install-RustDesk.ps1')
 }
 
 if ($Configure) {
-    Write-Passo '2/4  Aplicando a configuracao nas duas configs'
+    Write-Passo '2/5  Aplicando a configuracao nas duas configs do RustDesk'
     $p = @{}
     if ($ConfigFile) { $p['ConfigFile'] = $ConfigFile }
     & (Join-Path $PSScriptRoot 'scripts\Set-RustDeskConfig.ps1') @p
 }
 
 if ($Watchdog) {
-    Write-Passo '3/4  Instalando o watchdog'
+    Write-Passo '3/5  Instalando o watchdog'
     & (Join-Path $PSScriptRoot 'scripts\Install-Watchdog.ps1') -IntervalMinutes $IntervalMinutes
 }
 
-if ($Test) {
-    Write-Passo '4/4  Verificando'
+if ($Herdr) {
+    Write-Passo '4/5  Instalando e configurando o Herdr (terminal da sessao)'
     $p = @{}
-    if ($ConfigFile) { $p['ConfigFile'] = $ConfigFile }
-    if ($ShowLogs)   { $p['ShowLogs']   = $true }
+    if ($SkipHerdrInstall) { $p['SkipInstall'] = $true }
+    & (Join-Path $PSScriptRoot 'scripts\Install-Herdr.ps1') @p
+
+    $p = @{}
+    if ($HerdrConfigFile) { $p['ConfigFile'] = $HerdrConfigFile }
+    & (Join-Path $PSScriptRoot 'scripts\Set-HerdrConfig.ps1') @p
+}
+
+if ($Test) {
+    Write-Passo '5/5  Verificando'
+    $p = @{}
+    if ($ConfigFile)      { $p['ConfigFile']      = $ConfigFile }
+    if ($HerdrConfigFile) { $p['HerdrConfigFile'] = $HerdrConfigFile }
+    if ($ShowLogs)        { $p['ShowLogs']        = $true }
     & (Join-Path $PSScriptRoot 'scripts\Test-RustDeskSetup.ps1') @p
 }

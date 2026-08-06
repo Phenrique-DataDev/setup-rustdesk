@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Valida a instalacao: binario, servico, watchdog e as DUAS configs.
+    Valida a stack inteira: RustDesk (binario, servico, watchdog, as DUAS
+    configs) e Herdr (binario, config, servidor no ar, autostart).
 
 .DESCRIPTION
     Cada verificacao vira uma linha PASS / FALHA / AVISO. Sai com codigo 1 se
@@ -8,14 +9,20 @@
 
     Somente leitura: nao altera nada. Roda sem elevacao, mas as verificacoes
     da config do servico exigem Administrador (o diretorio e protegido) e
-    aparecem como AVISO quando nao ha privilegio.
+    aparecem como AVISO quando nao ha privilegio. A parte do Herdr mora no
+    perfil do usuario e e verificada sem elevacao.
 
 .PARAMETER ShowLogs
-    Inclui as ultimas linhas dos logs do servico e do terminal-helper.
+    Inclui as ultimas linhas dos logs do RustDesk e do Herdr.
+
+.PARAMETER SkipHerdr
+    Nao verifica a metade Herdr da stack.
 #>
 [CmdletBinding()]
 param(
     [string]$ConfigFile,
+    [string]$HerdrConfigFile,
+    [switch]$SkipHerdr,
     [switch]$ShowLogs
 )
 
@@ -23,8 +30,9 @@ $ErrorActionPreference = 'Continue'
 Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskToml.psm1')   -Force
 
-$script:falhas = 0
-$script:avisos = 0
+$script:falhas         = 0
+$script:avisos         = 0
+$script:senhaFaltando  = $false
 
 function Test-Item($nome, $ok, $detalhe = '') {
     if ($ok -eq $true) {
@@ -43,7 +51,7 @@ $paths    = Get-RustDeskPaths
 $elevated = Test-Elevated
 
 Write-Host ''
-Write-Host '=== RustDesk: verificacao do setup ===' -ForegroundColor Cyan
+Write-Host '=== Acesso remoto: verificacao do setup (RustDesk + Herdr) ===' -ForegroundColor Cyan
 if (-not $elevated) {
     Write-Host '  (sem elevacao: a config do servico nao pode ser lida)' -ForegroundColor Yellow
 }
@@ -117,10 +125,12 @@ foreach ($alvo in @(
         continue
     }
     if (-not (Test-Path -LiteralPath $alvo.Arquivo)) {
+        $script:senhaFaltando = $true
         Test-Item "senha do $($alvo.Nome) gravada" $false 'RustDesk.toml nao existe'
         continue
     }
     $temSenha = [bool](Select-String -LiteralPath $alvo.Arquivo -Pattern "^\s*password\s*=\s*'.+'" -Quiet)
+    if (-not $temSenha) { $script:senhaFaltando = $true }
     Test-Item "senha do $($alvo.Nome) gravada" $temSenha `
         $(if (-not $temSenha) { 'defina uma senha permanente na UI do RustDesk' } else { '' })
 }
@@ -164,12 +174,63 @@ if ($cm.Count -gt 1) {
         "$($cm.Count) processos --cm ativos; um deles pode estar orfao segurando o pipe query_cm"
 }
 
+# --- Herdr -------------------------------------------------------------
+# O RustDesk entrega o transporte; o Herdr e o que mantem o trabalho vivo
+# quando ele cai. Uma stack com metade verde nao entrega o que se quer.
+$hPaths = Get-HerdrPaths
+if (-not $SkipHerdr) {
+    Write-Host ''
+    Write-Host 'Herdr (terminal da sessao)' -ForegroundColor Cyan
+    Test-Item 'herdr.exe encontrado' $hPaths.Installed `
+        $(if ($hPaths.Installed) { $hPaths.Exe } else { 'rode .\Setup.ps1 -Herdr' })
+
+    if ($hPaths.Installed) {
+        if (-not $HerdrConfigFile) {
+            $hCustom  = Join-Path $PSScriptRoot '..\config\herdr-custom.psd1'
+            $hDefault = Join-Path $PSScriptRoot '..\config\herdr.psd1'
+            $HerdrConfigFile = if (Test-Path -LiteralPath $hCustom) { $hCustom } else { $hDefault }
+        }
+        Write-Host "  esperado conforme: $(Split-Path $HerdrConfigFile -Leaf)" -ForegroundColor DarkGray
+
+        if (-not (Test-Path -LiteralPath $hPaths.Config)) {
+            Test-Item 'config.toml do Herdr existe' $false $hPaths.Config
+        } else {
+            Test-Item 'config.toml do Herdr sem BOM' (-not (Test-TomlBom -Path $hPaths.Config)) `
+                'mesma armadilha do .toml do RustDesk'
+
+            $hEsperado = Import-RustDeskConfigFile -Path $HerdrConfigFile
+            foreach ($secao in ($hEsperado.Keys | Sort-Object)) {
+                foreach ($k in ($hEsperado[$secao].Keys | Sort-Object)) {
+                    # o arquivo guarda o literal TOML (true, 10485760, "hidden"),
+                    # entao a comparacao e feita no literal, nao no valor do psd1
+                    $lit   = ConvertTo-TomlLiteral -Value $hEsperado[$secao][$k]
+                    $atual = Get-TomlSectionValue -Path $hPaths.Config -Section $secao -Key $k
+                    Test-Item "[$secao] $k = $lit" ($atual -eq $lit) `
+                        $(if ($null -eq $atual) { 'ausente do arquivo' } elseif ($atual -ne $lit) { "encontrado: $atual" } else { '' })
+                }
+            }
+        }
+
+        # o servidor e o ponto inteiro do Herdr aqui: sem ele, a queda da
+        # conexao leva o trabalho junto
+        Test-Item 'servidor do Herdr no ar' $(if (Test-HerdrServer) { $true } else { 'aviso' }) `
+            $(if (Test-HerdrServer) { '' } else { 'suba com "herdr server" ou faca logoff/logon' })
+
+        # Get-ScheduledTask so enxerga tarefas do proprio usuario sem elevacao -
+        # esta e do usuario, entao a consulta e confiavel aqui.
+        $hTask = Get-ScheduledTask -TaskName $hPaths.TaskName -ErrorAction SilentlyContinue
+        Test-Item 'autostart do servidor no logon' $(if ($hTask) { $true } else { 'aviso' }) `
+            $(if ($hTask) { "tarefa '$($hPaths.TaskName)': $($hTask.State)" } else { "tarefa '$($hPaths.TaskName)' ausente - rode .\Setup.ps1 -Herdr" })
+    }
+}
+
 # --- logs --------------------------------------------------------------
 if ($ShowLogs) {
     Write-Host ''
     Write-Host 'Logs recentes' -ForegroundColor Cyan
     $dirs = @($paths.UserLogDir)
     if ($elevated) { $dirs += $paths.ServiceLogDir }
+    if (-not $SkipHerdr -and (Test-Path -LiteralPath $hPaths.ConfigDir)) { $dirs += $hPaths.ConfigDir }
     foreach ($d in $dirs) {
         if (-not (Test-Path -LiteralPath $d)) { continue }
         Get-ChildItem -LiteralPath $d -Recurse -Filter '*.log' -ErrorAction SilentlyContinue |
@@ -189,6 +250,15 @@ if ($script:falhas -eq 0) {
     Write-Host ''
     Write-Host 'Teste manual que falta: bloqueie a tela (Win+L) e conecte de outra maquina,' -ForegroundColor Cyan
     Write-Host 'abrindo o Terminal. Nenhuma verificacao automatica cobre esse caminho.'      -ForegroundColor Cyan
+} elseif ($script:falhas -gt 0 -and $script:senhaFaltando) {
+    # a senha permanente e o unico passo obrigatorio que nenhum script aplica:
+    # ela e definida pela UI e sem ela a conexao com a tela bloqueada falha
+    Write-Host "=== $script:falhas falha(s), $script:avisos aviso(s) ===" -ForegroundColor Red
+    Write-Host ''
+    Write-Host 'Falta a senha permanente. Abra a UI do RustDesk, defina uma senha fixa em' -ForegroundColor Yellow
+    Write-Host '"Senha" e rode a verificacao de novo. Sem ela nao ha como autenticar com a' -ForegroundColor Yellow
+    Write-Host 'tela bloqueada - e nenhum script pode faze-lo por voce.'                    -ForegroundColor Yellow
+    exit 1
 } else {
     Write-Host "=== $script:falhas falha(s), $script:avisos aviso(s) ===" -ForegroundColor Red
     exit 1

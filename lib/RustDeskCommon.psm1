@@ -124,6 +124,29 @@ function Get-HerdrPaths {
         Config     = Join-Path $env:APPDATA 'herdr\config.toml'
         Socket     = Join-Path $env:APPDATA 'herdr\herdr.sock'
         ServerLog  = Join-Path $env:APPDATA 'herdr\herdr-server.log'
+        ClientLog  = Join-Path $env:APPDATA 'herdr\herdr-client.log'
+        TaskName   = 'HerdrServer'
+    }
+}
+
+function Test-HerdrServer {
+    <#
+    .SYNOPSIS
+        Retorna $true se o servidor do Herdr esta no ar.
+    .NOTES
+        A pergunta e respondida pelo proprio Herdr ('herdr status server'), nao
+        pela existencia do .sock: o socket sobrevive a uma queda do servidor e
+        daria falso positivo.
+    #>
+    [CmdletBinding()] param()
+
+    $paths = Get-HerdrPaths
+    if (-not $paths.Installed) { return $false }
+    try {
+        $saida = & $paths.Exe status server 2>&1 | Out-String
+        return [bool]($saida -match '(?m)^\s*status:\s*running')
+    } catch {
+        return $false
     }
 }
 
@@ -235,5 +258,5 @@ function Start-RustDeskUI {
 }
 
 Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Get-HerdrPaths,
-                              Import-RustDeskConfigFile,
+                              Test-HerdrServer, Import-RustDeskConfigFile,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI
