@@ -31,6 +31,13 @@
     'enable-clipboard'                 = 'Y'
     'enable-file-transfer'             = 'Y'
     'enable-audio'                     = 'Y'
+
+    # Fonte do audio transmitido. Vazio = loopback da saida padrao do Windows,
+    # ou seja, o som do sistema. Preencher com o nome de um dispositivo troca a
+    # captura para aquele microfone - e, se o nome nao bater exatamente com um
+    # endpoint de captura ('Microfone (Fulano)', nao 'Fulano'), a captura nao
+    # sobe e a sessao fica muda sem erro visivel.
+    'audio-input'                      = ''
     'enable-tunnel'                    = 'Y'
     'enable-remote-restart'            = 'Y'
 
