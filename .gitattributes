@@ -1,0 +1,12 @@
+# Scripts de shell PRECISAM de LF: com CRLF o Linux falha com
+# "bad interpreter: /bin/bash^M". Em checkout no Windows o autocrlf
+# converteria sem isto.
+*.sh text eol=lf
+
+# O formato nativo dos .toml do RustDesk e do Herdr e UTF-8 sem BOM com LF.
+*.toml text eol=lf
+
+# PowerShell roda com qualquer um; CRLF e o normal no Windows.
+*.ps1  text eol=crlf
+*.psd1 text eol=crlf
+*.psm1 text eol=crlf
