@@ -677,6 +677,17 @@ aplicada por `-All` (as 28 chaves do RustDesk — 14 × 2 perfis — verificadas
 `allow-remote-config-modification` corrigido para `'N'` nos dois): o teste de tela
 bloqueada **voltou a funcionar**. Continua sendo um ponto de dado de uma única máquina.
 
+**Revalidado em 2026-08-07**, depois do merge do backlog e com a verificação elevada em
+51 PASS / 0 avisos. O bloqueio foi disparado por `LockWorkStation` a partir da própria
+sessão remota (o `Win+L` do cliente não chega à máquina): a conexão **não caiu**, o
+Terminal seguiu executando e nada travou. Ao fim, `query session` continuava com o console
+`Ativo` e o serviço `Running`.
+
+Vale o registro preciso do que esse ponto de dado cobre: uma sessão **já conectada**
+sobrevivendo ao bloqueio. Ele não exercita a conexão *nova* contra a tela de logon — para
+isso é preciso desconectar antes de bloquear, e é o caminho que o `allow-logon-screen-password`
+serve. O teste de 2026-08-06 cobriu esse outro caminho.
+
 O que este teste **não** cobriu, para não se confundir depois: houve bloqueio e
 desbloqueio de tela, não logoff. O processo do servidor Herdr seguiu sendo o mesmo de
 antes do teste e a tarefa `HerdrServer` não foi disparada por ele — então o autostart
