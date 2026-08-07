@@ -585,6 +585,18 @@ tests/RustDeskToml.Tests.ps1    10 testes, sem tocar em instalação real
 
 ---
 
+## Linux
+
+Este repositório é validado no Windows. Há **suporte inicial** para Linux em
+[`docs/linux.md`](docs/linux.md): o Herdr (instalação, config e autostart por systemd user
+unit) está automatizado em `scripts/linux/setup-herdr.sh` e foi executado em Ubuntu 26.04;
+o RustDesk está documentado passo a passo, mas ainda é manual.
+
+A armadilha equivalente à "tela bloqueada" lá é outra: **acesso à tela de logon exige X11**,
+não Wayland.
+
+---
+
 ## Requisitos
 
 - Windows 10/11

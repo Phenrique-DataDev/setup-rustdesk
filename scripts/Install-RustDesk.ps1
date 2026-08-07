@@ -91,4 +91,42 @@ if ($rc1 -eq 0 -and $rc2 -eq 0) {
 $svc = Get-Service -Name $paths.ServiceName
 $log += "estado final: $($svc.Status) / $($svc.StartType)"
 
+# --- 4) garantir que as DUAS configs existam --------------------------
+# Numa maquina zerada os RustDesk2.toml ainda nao nasceram: o RustDesk os cria
+# na primeira vez que roda em cada perfil. Sem eles, o -Configure seguinte nao
+# tem o que editar e o -All termina com falhas na primeira passada - foi o que
+# um teste em Windows limpo mostrou. Esperar aqui e o que torna o -All
+# utilizavel de uma vez so.
+function Wait-Config($caminho, $rotulo, $segundos) {
+    if (Test-Path -LiteralPath $caminho) { return $true }
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalSeconds -lt $segundos) {
+        Start-Sleep -Seconds 2
+        if (Test-Path -LiteralPath $caminho) {
+            $script:log += "  config do $rotulo criada em $([math]::Round(((Get-Date) - $t0).TotalSeconds))s"
+            return $true
+        }
+    }
+    return $false
+}
+
+$log += '--- aguardando as configs nascerem ---'
+
+if (-not (Wait-Config $paths.ServiceConfig 'servico' 45)) {
+    $log += '  AVISO: a config do servico nao apareceu em 45s.'
+    $log += "  $($paths.ServiceConfig)"
+}
+
+# A config do usuario so nasce quando o RustDesk roda na sessao interativa.
+# Start-RustDeskUI sobe a bandeja sem elevacao (via tarefa temporaria) - o
+# jeito confiavel a partir de um console elevado.
+if (-not (Test-Path -LiteralPath $paths.UserConfig)) {
+    $log += '  config do usuario ausente - subindo a bandeja para cria-la'
+    $log += (Start-RustDeskUI)
+    if (-not (Wait-Config $paths.UserConfig 'usuario' 45)) {
+        $log += '  AVISO: a config do usuario nao apareceu em 45s.'
+        $log += '  Abra o RustDesk uma vez pelo menu Iniciar e rode: .\Setup.ps1 -Configure'
+    }
+}
+
 $log | ForEach-Object { Write-Host "  $_" }
