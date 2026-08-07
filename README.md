@@ -688,6 +688,22 @@ sobrevivendo ao bloqueio. Ele não exercita a conexão *nova* contra a tela de l
 isso é preciso desconectar antes de bloquear, e é o caminho que o `allow-logon-screen-password`
 serve. O teste de 2026-08-06 cobriu esse outro caminho.
 
+Na mesma data, o **caminho completo** também foi exercitado: desconectar, bloquear a tela
+com a máquina sem ninguém conectado, e então **conectar do zero**. A tela de logon apareceu,
+a senha permanente autenticou e o Terminal abriu normalmente. A evidência que fecha o ponto
+é objetiva — durante a sessão de Terminal, `Get-Process LogonUI` seguia ativo na sessão 1,
+ou seja, **a tela continuava bloqueada enquanto os comandos rodavam**. Não houve desbloqueio.
+
+Como bloquear a tela quando não há ninguém na máquina para apertar `Win+L`, e a própria
+conexão será encerrada:
+
+```powershell
+Start-Sleep -Seconds 45; rundll32.exe user32.dll,LockWorkStation
+```
+
+Desconecte durante os 45 segundos. O processo sobrevive à queda da conexão, porque
+desconectar **não** encerra a sessão do Windows.
+
 O que este teste **não** cobriu, para não se confundir depois: houve bloqueio e
 desbloqueio de tela, não logoff. O processo do servidor Herdr seguiu sendo o mesmo de
 antes do teste e a tarefa `HerdrServer` não foi disparada por ele — então o autostart

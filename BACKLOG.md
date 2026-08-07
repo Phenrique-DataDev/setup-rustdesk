@@ -113,9 +113,13 @@ Conectar de outra máquina **com a tela bloqueada** e abrir o Terminal.
 derrubou a conexão nem o Terminal (console `Ativo`, serviço `Running` ao fim). Feito depois
 da verificação elevada em 51 PASS / 0 avisos.
 
-Continua em aberto a outra metade: **conexão nova contra a tela de logon** — desconectar,
-bloquear, e só então conectar. É o caminho que `allow-logon-screen-password` serve, e o
-único coberto pelo teste de 2026-08-06, anterior às mudanças no `Install-RustDesk.ps1`.
+**Fechado por completo em 2026-08-07.** A outra metade — desconectar, bloquear, e então
+**conectar do zero** contra a tela de logon — também foi exercitada: tela de logon exibida,
+senha permanente aceita, Terminal aberto e operante. A evidência é objetiva: durante a
+sessão de Terminal, `Get-Process LogonUI` seguia ativo na sessão 1, então a tela continuava
+bloqueada enquanto os comandos rodavam.
+
+Sobra apenas o de sempre: é um ponto de dado de **uma** máquina, esta. Repita na sua.
 
 Lembrar da distinção: `Win+L` funciona, **logoff não** — o Terminal exige sessão de
 console. Está no README.
