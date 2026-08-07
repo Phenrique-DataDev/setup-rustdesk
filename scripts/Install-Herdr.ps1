@@ -110,10 +110,32 @@ if ($paths.Installed) {
             # documentacao do Herdr descreve: ele mexe no PATH do usuario e no
             # layout de %LOCALAPPDATA%\Programs\Herdr, e um processo proprio
             # mantem isso fora do escopo desta sessao.
-            $p = Start-Process -FilePath 'powershell.exe' -Wait -PassThru -NoNewWindow -ArgumentList @(
-                '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tmp
-            )
-            if ($p.ExitCode -ne 0) { throw "o instalador do Herdr retornou codigo $($p.ExitCode)" }
+            #
+            # A saida e capturada em arquivo: sem ela, uma falha vira "retornou
+            # codigo 1" e nao ha o que diagnosticar - o instalador tem mais de
+            # dez pontos de erro distintos (checksum, arquitetura, canal,
+            # verificacao do binario baixado) e todos parecem iguais de fora.
+            $outFile = "$tmp.out"
+            $errFile = "$tmp.err"
+            $p = Start-Process -FilePath 'powershell.exe' -Wait -PassThru -NoNewWindow `
+                    -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
+                    -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tmp)
+
+            $saidaInst = @()
+            foreach ($f in @($outFile, $errFile)) {
+                if (Test-Path -LiteralPath $f) {
+                    $saidaInst += (Get-Content -LiteralPath $f -ErrorAction SilentlyContinue)
+                    Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+                }
+            }
+            $saidaInst = @($saidaInst | Where-Object { "$_".Trim() })
+
+            if ($p.ExitCode -ne 0) {
+                $det = if ($saidaInst) { "`n  " + ($saidaInst -join "`n  ") } else { ' (o instalador nao produziu saida)' }
+                throw "o instalador do Herdr retornou codigo $($p.ExitCode):$det"
+            }
+            # em caso de sucesso a saida ainda ajuda: diz o canal e a versao
+            $saidaInst | Select-Object -Last 5 | ForEach-Object { $log += "  | $_" }
         } finally {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         }
