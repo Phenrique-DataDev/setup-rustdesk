@@ -67,6 +67,16 @@ afetam quem edita este repo:
   consultáveis sem elevação.
 - **O Herdr recarrega sem reiniciar** (`herdr server reload-config`), diferente do RustDesk.
 
+## O que está em aberto
+
+`BACKLOG.md` lista o que ficou por validar, ordenado por risco. Leia antes de propor
+trabalho novo — em especial os itens 1 e 2, que são o mesmo cenário: **numa máquina Windows
+zerada, rode `.\Setup.ps1 -All` e guarde a saída**, porque três caminhos do repo (instalação
+do Herdr, escrita da senha, e o ramo do `winget`) nunca foram executados.
+
+Suporte a Linux: `docs/linux.md`. O Herdr está automatizado e validado; o RustDesk é
+documentação, não código.
+
 ## Limites reais
 
 - A rolagem no **Terminal embutido do RustDesk** não é configurável — é um widget
