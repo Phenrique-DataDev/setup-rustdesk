@@ -144,13 +144,21 @@ confirmado na prática: conectando pelo IP local a sessão abre visivelmente mai
 no roteador, e ficou definido que **não se mexe em portas do roteador nesta máquina**. Não
 proponha essa rota de novo.
 
-As duas alternativas restantes seguem abertas, se algum dia o incômodo justificar:
+Restava o IPv6, e ele foi investigado em 2026-08-10 — **não estava quebrado**. A máquina
+tem IPv6 global (`2804:…` via Router Advertisement), resolução AAAA funciona e o IPv6 real
+responde em 4 ms. O que havia era uma **corrida no boot**: o serviço sobe antes do RA
+completar, falha ao resolver os STUN e segue sem IPv6 até ser reiniciado. O watchdog passou
+a detectar e corrigir isso (item 6 dele).
 
-- consertar a resolução IPv6 — o serviço registra `Failed to resolve STUN ipv6 server
-  address` a cada inicialização, o que elimina um caminho de conexão direta;
-- hospedar `hbbs`/`hbbr` próprios, que também tirariam o `rs-ny` (~188 ms daqui).
+Isso importa porque **IPv6 não tem NAT**: com IPv6 nos dois lados não há hole punching, e
+os ~10 s deixariam de existir sem tocar no roteador.
 
-Nenhuma das duas é mexer no roteador.
+**O que ainda não foi medido:** se uma conexão real de fora passa a usar IPv6 agora que o
+serviço o enxerga. Depende também do cliente ter IPv6. Vale olhar o log do serviço na
+próxima conexão externa e ver se o punch some.
+
+A alternativa restante, se nada disso bastar: hospedar `hbbs`/`hbbr` próprios, que também
+tirariam o `rs-ny` (~188 ms daqui). Também não envolve o roteador.
 
 ---
 
