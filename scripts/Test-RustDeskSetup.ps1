@@ -33,6 +33,22 @@ Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskToml.psm1')   -Force
 $script:falhas         = 0
 $script:avisos         = 0
 $script:senhaFaltando  = $false
+$script:senhaFp        = @{}
+$script:senhaMtime     = @{}
+
+# Impressao digital de um campo do .toml: identifica o VALOR sem revela-lo, para
+# poder comparar os dois perfis numa saida que o usuario pode colar em qualquer
+# lugar. 12 hex chars bastam para comparar dois valores; nao servem para
+# recuperar o original (que ja e hash+salt de qualquer forma).
+function Get-FieldFingerprint([string]$Path, [string]$Key) {
+    $linha = Select-String -LiteralPath $Path -Pattern "^\s*$Key\s*=" |
+             Select-Object -First 1 -ExpandProperty Line
+    if (-not $linha) { return '<ausente>' }
+    $valor = ($linha -split '=', 2)[1].Trim()
+    if ($valor -match "^''$|^`"`"$") { return '<vazio>' }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($valor)
+    ([BitConverter]::ToString([Security.Cryptography.SHA256]::HashData($bytes)) -replace '-', '').Substring(0, 12)
+}
 
 function Test-Item($nome, $ok, $detalhe = '') {
     if ($ok -eq $true) {
@@ -133,6 +149,32 @@ foreach ($alvo in @(
     if (-not $temSenha) { $script:senhaFaltando = $true }
     Test-Item "senha do $($alvo.Nome) gravada" $temSenha `
         $(if (-not $temSenha) { 'defina uma senha permanente na UI do RustDesk' } else { '' })
+    if (-not $temSenha) { continue }
+
+    # Presenca nao basta: os dois perfis podem ter senhas DIFERENTES e cada um
+    # passar isolado. Quem autentica e o servico, entao divergir significa que a
+    # senha que a UI mostra nao e a que valida a conexao. Guarda a impressao
+    # digital (SHA-256 truncado do valor gravado, que ja e hash+salt) para
+    # comparar depois sem nunca imprimir o segredo.
+    $script:senhaFp[$alvo.Nome] = Get-FieldFingerprint -Path $alvo.Arquivo -Key 'password'
+    $script:senhaMtime[$alvo.Nome] = (Get-Item -LiteralPath $alvo.Arquivo).LastWriteTime
+}
+
+# So da para comparar quando os dois lados foram lidos (exige Administrador).
+if ($script:senhaFp.Count -eq 2) {
+    $iguais = $script:senhaFp['usuario'] -eq $script:senhaFp['servico']
+    Test-Item 'senha identica nos dois perfis' $iguais `
+        $(if ($iguais) { "impressao digital: $($script:senhaFp['usuario'])" }
+          else { "usuario=$($script:senhaFp['usuario'])  servico=$($script:senhaFp['servico']) - regrave com .\scripts\Set-RustDeskPassword.ps1, que grava via IPC nos dois" })
+}
+
+# A data nao e um teste - e o dado que falta quando a senha "esta certa" e mesmo
+# assim e recusada. Uma senha de meses atras costuma ser uma que ninguem lembra.
+if ($script:senhaMtime.Count -gt 0) {
+    $ts   = ($script:senhaMtime.Values | Measure-Object -Maximum -Property Ticks).Maximum
+    $data = [datetime]::new($ts)
+    $dias = [int]((Get-Date) - $data).TotalDays
+    Write-Host "          senha alterada pela ultima vez em $($data.ToString('yyyy-MM-dd HH:mm')) ($dias dia(s) atras)" -ForegroundColor DarkGray
 }
 
 # --- watchdog ----------------------------------------------------------
