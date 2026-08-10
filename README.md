@@ -162,9 +162,15 @@ caminho que não passa por lá:
 
 O ID continua funcionando: isto **adiciona** um caminho, não substitui o existente.
 
-- **Mesma rede:** resolvido. A sessão abre imediatamente pelo IP local.
+- **Mesma rede:** resolvido, e confirmado na prática — pelo IP local a sessão abre
+  visivelmente mais rápido (validado em 2026-08-10).
 - **Pela internet:** exige encaminhar a porta `21118/TCP` no roteador para esta máquina.
-  Não há configuração do RustDesk que substitua o port forward.
+  Não há configuração do RustDesk que substitua o port forward. **Na máquina de referência
+  isso foi descartado por decisão** — não se mexe em portas do roteador aqui, então a espera
+  de ~10 s continua valendo para conexões de fora.
+
+Ligar `direct-server` **não interfere** no caminho autenticado pelo serviço: a conexão com a
+tela bloqueada foi revalidada com essas opções ativas e segue funcionando.
 
 Se nem isso for possível, as saídas restantes estão fora do escopo deste repositório:
 consertar a resolução IPv6 (o serviço registra `Failed to resolve STUN ipv6 server address`

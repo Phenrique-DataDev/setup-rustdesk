@@ -119,10 +119,38 @@ senha permanente aceita, Terminal aberto e operante. A evidência é objetiva: d
 sessão de Terminal, `Get-Process LogonUI` seguia ativo na sessão 1, então a tela continuava
 bloqueada enquanto os comandos rodavam.
 
+**Revalidado em 2026-08-10**, agora contra uma configuração diferente: `direct-server`,
+`direct-access-port` e `enable-lan-discovery` ligados, e senha permanente regravada no
+mesmo dia. Segue funcionando com a tela bloqueada. É o que importava saber — as opções de
+conexão direta **adicionam** um caminho sem interferir no caminho autenticado pelo serviço.
+
 Sobra apenas o de sempre: é um ponto de dado de **uma** máquina, esta. Repita na sua.
 
 Lembrar da distinção: `Win+L` funciona, **logoff não** — o Terminal exige sessão de
 console. Está no README.
+
+---
+
+## 8. Os ~10 s pela internet: decidido não resolver
+
+Medido em 2026-08-10 (logs do serviço): o hole punching TCP falha em 0,3 s e o RustDesk só
+pede relay ~10 s depois. Esses 10 s são o timeout do punch — nenhuma opção do RustDesk os
+encurta.
+
+`direct-server` + `direct-access-port=21118` resolveram **na mesma rede**, e isso foi
+confirmado na prática: conectando pelo IP local a sessão abre visivelmente mais rápido.
+
+**Pela internet o problema continua, por decisão.** Fechar exigiria encaminhar `21118/TCP`
+no roteador, e ficou definido que **não se mexe em portas do roteador nesta máquina**. Não
+proponha essa rota de novo.
+
+As duas alternativas restantes seguem abertas, se algum dia o incômodo justificar:
+
+- consertar a resolução IPv6 — o serviço registra `Failed to resolve STUN ipv6 server
+  address` a cada inicialização, o que elimina um caminho de conexão direta;
+- hospedar `hbbs`/`hbbr` próprios, que também tirariam o `rs-ny` (~188 ms daqui).
+
+Nenhuma das duas é mexer no roteador.
 
 ---
 
