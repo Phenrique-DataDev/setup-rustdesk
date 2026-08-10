@@ -8,10 +8,22 @@
       2. o servico existe (reinstala se sumiu);
       3. o servico esta Running (inicia se caiu);
       4. o StartType e Automatic;
-      5. nenhuma das configs tem stop-service = 'Y'.
+      5. nenhuma das configs tem stop-service = 'Y';
+      6. o servico enxerga o IPv6 (so quando a maquina tem IPv6 global).
 
     O item 5 importa porque um servico "OK" com stop-service = 'Y' na config
     recusa conexoes: o acesso remoto fica morto com todos os indicadores verdes.
+
+    O item 6 existe por uma corrida no boot: o servico e AUTO_START e sobe
+    antes de o Router Advertisement completar, entao falha ao resolver os STUN
+    IPv6 e segue SEM IPv6 ate alguem reinicia-lo. Como IPv6 nao tem NAT, perder
+    isso significa perder o caminho que dispensa hole punching.
+
+    O reinicio e deliberadamente conservador - ele derruba sessao ativa:
+      - so age se a maquina TEM IPv6 global agora (senao reiniciaria para
+        sempre, a cada passada, numa rede que nunca vai ter IPv6);
+      - no maximo UMA vez por boot, marcado em disco;
+      - nunca com sessao remota em curso (processo --cm no ar).
 
     Instalado por scripts/Install-Watchdog.ps1, que substitui os marcadores
     __TOKEN__ pelos caminhos reais da maquina.
@@ -20,6 +32,7 @@
 $exe       = '__EXE__'
 $logFile   = '__LOGFILE__'
 $cfgFiles  = @(__CFGFILES__)
+$svcLogDir = '__SVCLOGDIR__'
 $maxLogMB  = 1
 $keepLines = 2000
 
@@ -98,6 +111,62 @@ foreach ($cfg in $cfgFiles) {
         [System.IO.File]::WriteAllText($cfg, (($novo -join "`n") + "`n"),
             (New-Object System.Text.UTF8Encoding($false)))
         Write-Log "Config corrigida. Backup em $cfg.watchdog.bak"
+    }
+}
+
+# --- 6. IPv6 visto pelo servico ---------------------------------------
+# Ver o cabecalho para o porque. A ordem das guardas importa: cada uma sozinha
+# ja evita um modo de falha diferente, e a mais barata vem primeiro.
+if ($svcLogDir -and (Test-Path $svcLogDir)) {
+    $temIPv6Global = [bool](Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue |
+        Where-Object { $_.PrefixOrigin -in @('RouterAdvertisement', 'Dhcp', 'Manual') -and
+                       $_.IPAddress -notmatch '^(fe80|::1)' -and $_.AddressState -eq 'Preferred' })
+
+    if ($temIPv6Global) {
+        $serverDir = Join-Path $svcLogDir 'server'
+        $ultimo = Get-ChildItem $serverDir -Filter *.log -ErrorAction SilentlyContinue |
+                  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+        if ($ultimo) {
+            # Le so o log da inicializacao mais recente: um sucesso de tres dias
+            # atras nao diz nada sobre o estado atual do servico.
+            $linhas = Get-Content -LiteralPath $ultimo.FullName -ErrorAction SilentlyContinue
+            $achouIPv6  = [bool]($linhas | Select-String -Pattern 'Found public IPv6 address' -Quiet)
+            $falhouIPv6 = [bool]($linhas | Select-String -Pattern 'Failed to (get public IPv6|bind IPv6)' -Quiet)
+
+            if ($falhouIPv6 -and -not $achouIPv6) {
+                # Uma vez por boot. Sem isto, um STUN fora do ar viraria um
+                # reinicio a cada passada do watchdog, para sempre.
+                $stamp     = "$logFile.ipv6-restart"
+                $bootAtual = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('o')
+                $jaTentou  = (Test-Path $stamp) -and
+                             ((Get-Content $stamp -ErrorAction SilentlyContinue | Select-Object -First 1) -eq $bootAtual)
+
+                # Reiniciar derruba quem estiver conectado. O connection manager
+                # (--cm) so existe enquanto ha sessao remota.
+                $emSessao = [bool](Get-CimInstance Win32_Process -Filter "Name='rustdesk.exe'" -ErrorAction SilentlyContinue |
+                                   Where-Object { $_.CommandLine -match '--cm' })
+
+                if ($jaTentou) {
+                    Write-Log 'Servico sem IPv6, mas ja foi reiniciado por isso neste boot. Nao insistindo.'
+                } elseif ($emSessao) {
+                    Write-Log 'Servico sem IPv6, mas ha sessao remota ativa. Adiando para a proxima passada.'
+                } else {
+                    Write-Log 'Servico subiu sem IPv6 (corrida no boot) e a maquina tem IPv6 global. Reiniciando.'
+                    Set-Content -LiteralPath $stamp -Value $bootAtual -Encoding ASCII
+                    Restart-Service -Name rustdesk -Force -ErrorAction SilentlyContinue
+                    Start-Sleep -Seconds 12
+
+                    $novoLog = Get-ChildItem $serverDir -Filter *.log -ErrorAction SilentlyContinue |
+                               Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    $ok = $novoLog -and (Select-String -LiteralPath $novoLog.FullName `
+                            -Pattern 'Found public IPv6 address' -Quiet)
+                    # Reconsultar em vez de anunciar, como no item 4.
+                    if ($ok) { Write-Log 'IPv6 recuperado apos o reinicio.' }
+                    else     { Write-Log 'AVISO: servico continua sem IPv6 apos o reinicio.' }
+                }
+            }
+        }
     }
 }
 

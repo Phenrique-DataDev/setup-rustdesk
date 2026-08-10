@@ -52,8 +52,9 @@ $content = Get-Content -LiteralPath $template -Raw
 $content = $content.Replace('__EXE__',      $paths.Exe)
 $content = $content.Replace('__LOGFILE__',  $paths.WatchdogLog)
 $content = $content.Replace('__CFGFILES__', $cfgLiteral)
+$content = $content.Replace('__SVCLOGDIR__', $paths.ServiceLogDir)
 
-if ($content -match '__(EXE|LOGFILE|CFGFILES)__') {
+if ($content -match '__(EXE|LOGFILE|CFGFILES|SVCLOGDIR)__') {
     throw 'algum marcador do template nao foi substituido - abortando para nao instalar script quebrado'
 }
 

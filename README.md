@@ -172,10 +172,13 @@ O ID continua funcionando: isto **adiciona** um caminho, não substitui o existe
 Ligar `direct-server` **não interfere** no caminho autenticado pelo serviço: a conexão com a
 tela bloqueada foi revalidada com essas opções ativas e segue funcionando.
 
-Se nem isso for possível, as saídas restantes estão fora do escopo deste repositório:
-consertar a resolução IPv6 (o serviço registra `Failed to resolve STUN ipv6 server address`
-a cada inicialização, o que elimina um caminho de conexão direta) ou hospedar `hbbs`/`hbbr`
-próprios, o que também tira o `rs-ny` — a ~188 ms daqui.
+Sobra o **IPv6**, que é o caminho mais promissor de todos justamente por não ter NAT: com
+IPv6 nos dois lados não há o que furar, e o timeout do punch deixa de existir. Esta máquina
+tem IPv6 global funcional — o que faltava era o serviço enxergá-lo, e isso o watchdog agora
+corrige (veja acima). Não depende do roteador.
+
+Fora isso, resta hospedar `hbbs`/`hbbr` próprios, o que também tiraria o `rs-ny` — a
+~188 ms daqui.
 
 ### Segurança
 
@@ -206,8 +209,23 @@ Tarefa "HerdrServer"                 usuário, no logon, sem limite de duração
 
 Duas camadas de proteção, de propósito: as **recovery actions do SCM** cobrem quedas do
 serviço em segundos; o **watchdog** cobre o que o SCM não vê — serviço desinstalado,
-desabilitado, ou `stop-service = 'Y'` na config (que deixa o acesso remoto morto com
-todos os indicadores verdes).
+desabilitado, `stop-service = 'Y'` na config (que deixa o acesso remoto morto com todos os
+indicadores verdes), ou o serviço **sem IPv6**.
+
+O caso do IPv6 é uma corrida no boot: o serviço é `AUTO_START` e sobe antes de o Router
+Advertisement completar, então falha ao resolver os STUN IPv6 e segue sem IPv6 até alguém
+reiniciá-lo. Como **IPv6 não tem NAT**, perder isso custa justamente o caminho que dispensa
+hole punching.
+
+O reinício é deliberadamente conservador, porque derruba sessão ativa:
+
+- só age se a máquina **tem** IPv6 global naquele momento — numa rede sem IPv6 ele nunca
+  dispara, em vez de reiniciar para sempre;
+- no máximo **uma vez por boot**, marcado em disco (um STUN fora do ar não vira reinício a
+  cada 10 min);
+- nunca com **sessão remota em curso** (processo `--cm` no ar) — adia para a próxima passada.
+
+Tudo o que ele decide vai para `watchdog.log`, inclusive as recusas.
 
 ---
 
