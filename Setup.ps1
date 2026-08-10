@@ -17,6 +17,11 @@
     Herdr com o servidor subindo no logon, e verifica. Exige Administrador.
 
 .EXAMPLE
+    .\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')
+    Setup completo em um comando so, ja com a senha permanente. Sem -Password o
+    setup termina apontando que ela falta - nenhum script inventa uma senha.
+
+.EXAMPLE
     .\Setup.ps1 -Configure
     So reaplica as opcoes das configs do RustDesk. Exige Administrador.
 
@@ -40,7 +45,8 @@ param(
     [string]$HerdrConfigFile,
     [int]$IntervalMinutes = 10,
     [switch]$SkipHerdrInstall,
-    [switch]$ShowLogs
+    [switch]$ShowLogs,
+    [System.Security.SecureString]$Password
 )
 
 $ErrorActionPreference = 'Stop'
@@ -98,8 +104,17 @@ if ($Herdr) {
     & (Join-Path $PSScriptRoot 'scripts\Set-HerdrConfig.ps1') @p
 }
 
+# A senha permanente era o unico passo que -All nao fechava, e numa maquina
+# zerada isso fazia o setup terminar em [FALHA]. Com -Password o fluxo inteiro
+# vira um comando. Sem ela o comportamento e o de antes: o Test aponta o que
+# falta.
+if ($Password) {
+    Write-Passo '5/6  Definindo a senha permanente'
+    & (Join-Path $PSScriptRoot 'scripts\Set-RustDeskPassword.ps1') -Password $Password
+}
+
 if ($Test) {
-    Write-Passo '5/5  Verificando'
+    Write-Passo $(if ($Password) { '6/6  Verificando' } else { '5/5  Verificando' })
     $p = @{}
     if ($ConfigFile)      { $p['ConfigFile']      = $ConfigFile }
     if ($HerdrConfigFile) { $p['HerdrConfigFile'] = $HerdrConfigFile }

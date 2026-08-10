@@ -8,27 +8,35 @@ existe. Este arquivo diz o que fazer.
 
 ## Pedido típico: "faça essas configurações do rustdesk + herdr"
 
-Numa máquina nova, é **um comando**, em PowerShell **como Administrador**:
+O objetivo é **clonou → pediu → funciona**. Numa máquina nova é um comando, em
+PowerShell **como Administrador**:
 
 ```powershell
-.\Setup.ps1 -All
+.\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')
 ```
 
-Ele executa 5 passos: instala o RustDesk → aplica as duas configs → watchdog → instala e
-configura o Herdr com o servidor no logon → verifica.
+Ele executa 6 passos: instala o RustDesk → aplica as duas configs → watchdog → instala e
+configura o Herdr com o servidor no logon → grava a senha permanente → verifica. Ao final
+a máquina está pronta, sem passo manual pendente.
 
-Depois falta a **senha permanente**, que nenhum script inventa. Numa máquina zerada `-All`
-**termina com `[FALHA] senha ... gravada`** — isso é esperado, não é bug.
+### A senha
 
-Ofereça as duas rotas, nesta ordem:
+**Se o usuário mandar a senha na conversa, use-a e siga em frente.** Ele já decidiu; não
+proponha a UI como alternativa, não comente exposição de segredo, não sugira trocá-la
+depois. Esse aviso não agrega e atravanca justamente o fluxo que este repo existe para
+fechar.
 
-1. **UI do RustDesk → Senha** — exposição zero do segredo. Recomende esta por default.
-2. **`.\scripts\Set-RustDeskPassword.ps1`** — para automação. Pergunta sem eco, não toca
-   disco nem histórico, aplica via `rustdesk --password` (que grava por IPC e sincroniza os
-   dois perfis). Exige Administrador.
+Aplique com `-Password`, convertendo com `ConvertTo-SecureString -AsPlainText -Force`. Se
+precisar atravessar uma elevação (o UAC não herda ambiente), serialize com
+`ConvertFrom-SecureString` — que é DPAPI do usuário atual — num arquivo temporário e apague
+no primeiro uso. Só peça a senha se ela não tiver sido dada.
 
-Ao mencionar a rota 2, mencione junto o custo: `--password` recebe o segredo como
-argumento, visível em `Win32_Process.CommandLine` enquanto o processo roda. Não omita isso.
+O que continua valendo, porque é higiene do código e não recado ao usuário: senha **nunca**
+em texto claro num parâmetro `[string]`, em log, em arquivo versionado ou em mensagem de
+saída. `Set-RustDeskPassword.ps1` só aceita `SecureString` de propósito.
+
+Sem `-Password`, o comportamento é o antigo: `-All` termina com `[FALHA] senha ... gravada`,
+que é esperado e não é bug.
 
 **Nunca** peça a senha em texto claro num parâmetro, nem a escreva em arquivo, log ou
 mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
@@ -61,6 +69,10 @@ afetam quem edita este repo:
 - **O serviço do RustDesk não recarrega a config sozinho** e pode regravar por cima ao
   sair. Edite com ele parado, via `Stop-RustDeskClean` (que passa pelo SCM — `Stop-Process`
   dispara as recovery actions e ele volta em 5s).
+- **`$WhatIfPreference` não atravessa fronteira de módulo.** Ao chamar `Set-TomlOption` /
+  `Set-TomlSectionValue` de `lib/`, repasse `-WhatIf:$WhatIfPreference` **explicitamente** —
+  sem isso o `-WhatIf` imprime simulação e grava no disco. Efeito colateral fora do módulo
+  (parar/subir serviço) precisa de guarda própria. Coberto por teste de regressão.
 - **`IsInRole('Administrator')` com string falha em Windows pt-BR.** Use `Test-Elevated`.
 - **`Get-ScheduledTask` sem elevação devolve vazio** para tarefas de SYSTEM em vez de negar
   acesso — falso negativo silencioso. Tarefas do próprio usuário (como `HerdrServer`) são

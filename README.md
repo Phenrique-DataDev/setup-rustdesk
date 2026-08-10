@@ -23,9 +23,12 @@ cd setup-rustdesk
 # 1. Ver o estado atual (não altera nada, não precisa de Administrador)
 .\Setup.ps1
 
-# 2. Setup completo — PowerShell como Administrador
-.\Setup.ps1 -All
+# 2. Setup completo, já com a senha — PowerShell como Administrador
+.\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')
 ```
+
+São 6 passos e ao final não sobra passo manual. Sem `-Password` o setup roda igual mas
+termina apontando que a senha falta — veja abaixo.
 
 Se o Windows bloquear a execução dos scripts:
 
@@ -33,19 +36,19 @@ Se o Windows bloquear a execução dos scripts:
 powershell.exe -ExecutionPolicy Bypass -File .\Setup.ps1 -All
 ```
 
-### O passo que nenhum script faz por você
+### A senha permanente
 
-**Defina uma senha permanente.** Com a tela bloqueada quem autentica é o serviço, e sem
-senha gravada a conexão falha mesmo com todas as opções corretas. Numa máquina zerada
-`-All` termina com `[FALHA] senha ... gravada` até você fazê-lo — isso é esperado, não é
-bug. Nenhum script inventa a sua senha.
+Com a tela bloqueada quem autentica é o serviço, e sem senha gravada a conexão falha mesmo
+com todas as opções corretas. Nenhum script inventa a sua senha: ou você passa `-Password`,
+ou o setup termina com `[FALHA] senha ... gravada` — o que é esperado, não é bug.
 
-Duas rotas, com trade-off diferente:
+Três rotas, com trade-off diferente:
 
 | Rota | Comando | Exposição do segredo |
 |---|---|---|
-| **UI** (recomendada para uma máquina) | RustDesk → **Senha** | nenhuma |
-| **Script** (para automação) | `.\scripts\Set-RustDeskPassword.ps1` | breve, na linha de comando do processo |
+| **No setup** (fluxo padrão) | `.\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')` | breve, na linha de comando do processo |
+| **UI** (exposição zero) | RustDesk → **Senha** | nenhuma |
+| **Avulsa** (trocar depois) | `.\scripts\Set-RustDeskPassword.ps1` | breve, na linha de comando do processo |
 
 O script pergunta a senha **sem eco**, nunca a escreve em disco, log ou histórico do
 PowerShell, e aplica via `rustdesk --password` — que grava por IPC, o mesmo caminho da UI,
@@ -134,6 +137,39 @@ notepad config\custom.psd1
 | `verification-method` | `use-permanent-password` | Autenticação por senha, sem depender de alguém clicar "aceitar" — impossível com a tela bloqueada. |
 | `approve-mode` | `password` | Idem. |
 | `stop-service` | `N` | `Y` aqui desliga o acesso remoto inteiro. O watchdog também vigia esta chave. |
+
+### Conexão direta: o que dá para fazer contra a demora de ~10 s
+
+Por padrão **toda** conexão passa pelo servidor de rendezvous público. O RustDesk tenta
+furar o NAT e, quando não consegue, espera o timeout antes de pedir relay. Nos logs desta
+máquina o padrão é sempre o mesmo:
+
+```
+00:11:03  Punch tcp hole to <peer>:1531
+00:11:04  Failed to connect                       ← o P2P morre em 0,3 s
+00:11:14  create_relay requested ... ovh-da1      ← relay só 10 s depois
+```
+
+Esses ~10 segundos de "carregando" são o **timeout do punch**, não lentidão do relay — e
+nenhuma opção do RustDesk encurta esse timeout. O que a configuração pode fazer é abrir um
+caminho que não passa por lá:
+
+| Chave | Valor | Por quê |
+|---|---|---|
+| `direct-server` | `Y` | Aceita conexão direta por IP. Quem conecta digita o IP em vez do ID: sem rendezvous, sem punch, sem relay. |
+| `direct-access-port` | `21118` | Porta dessa conexão direta (padrão do RustDesk). |
+| `enable-lan-discovery` | `Y` | A máquina aparece sozinha na aba de descoberta dos clientes da mesma rede. |
+
+O ID continua funcionando: isto **adiciona** um caminho, não substitui o existente.
+
+- **Mesma rede:** resolvido. A sessão abre imediatamente pelo IP local.
+- **Pela internet:** exige encaminhar a porta `21118/TCP` no roteador para esta máquina.
+  Não há configuração do RustDesk que substitua o port forward.
+
+Se nem isso for possível, as saídas restantes estão fora do escopo deste repositório:
+consertar a resolução IPv6 (o serviço registra `Failed to resolve STUN ipv6 server address`
+a cada inicialização, o que elimina um caminho de conexão direta) ou hospedar `hbbs`/`hbbr`
+próprios, o que também tira o `rs-ny` — a ~188 ms daqui.
 
 ### Segurança
 
@@ -622,6 +658,13 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
   precisa passar pelo SCM (`Stop-Service` + `WaitForStatus('Stopped')`).
 - **O serviço não recarrega a config sozinha.** Editar o arquivo com ele no ar não tem
   efeito, e ele ainda pode regravar por cima ao sair. Edite com o serviço parado.
+- **`$WhatIfPreference` não atravessa fronteira de módulo.** Uma função exportada de
+  `lib/*.psm1` roda com o preference do escopo *dela*, não o do script que a chamou. Por
+  isso `Set-RustDeskConfig.ps1 -WhatIf` chegou a **gravar de verdade** (e a parar o
+  serviço) enquanto imprimia uma simulação convincente na tela. Quem chama `Set-TomlOption`
+  ou `Set-TomlSectionValue` precisa repassar `-WhatIf:$WhatIfPreference` explicitamente, e
+  efeitos colaterais fora do módulo (parar/subir serviço) precisam de guarda própria. Há
+  teste de regressão para as duas coisas.
 - **`IsInRole('Administrator')` com string falha em Windows localizado.** Em pt-BR o nome
   do grupo é traduzido e a checagem dá falso negativo. Use o enum `WindowsBuiltInRole`.
 - **`Get-ScheduledTask` sem elevação devolve vazio** para tarefas de SYSTEM, em vez de
