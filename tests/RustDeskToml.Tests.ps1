@@ -310,6 +310,45 @@ It 'sem alteracao a fazer, nao cria backup' {
     Assert-True (-not (Test-Path "$f.bak")) 'backup criado sem necessidade'
 }
 
+Write-Host ''
+Write-Host '=== Testes: os scripts repassam -WhatIf para o modulo ===' -ForegroundColor Cyan
+
+# Regressao real: '-WhatIf' em Set-RustDeskConfig.ps1 gravava de verdade.
+# $WhatIfPreference NAO atravessa fronteira de modulo - uma funcao exportada de
+# lib\*.psm1 roda com o preference do escopo dela, nao o do script chamador.
+# Quem chama Set-TomlOption/Set-TomlSectionValue sem -WhatIf explicito simula na
+# tela e escreve no disco. Nao da para testar isso via execucao (os scripts
+# exigem elevacao e mexem em caminhos reais), entao verifica-se a chamada.
+$scriptsDir = Join-Path $PSScriptRoot '..\scripts'
+foreach ($caso in @(
+    @{ Arquivo = 'Set-RustDeskConfig.ps1'; Funcao = 'Set-TomlOption' },
+    @{ Arquivo = 'Set-HerdrConfig.ps1';    Funcao = 'Set-TomlSectionValue' }
+)) {
+    It "$($caso.Arquivo) repassa -WhatIf para $($caso.Funcao)" {
+        $caminho = Join-Path $scriptsDir $caso.Arquivo
+        Assert-True (Test-Path -LiteralPath $caminho) "script nao encontrado: $caminho"
+
+        $chamadas = (Get-Content -LiteralPath $caminho) |
+                    Where-Object { $_ -match [regex]::Escape($caso.Funcao) -and $_ -notmatch '^\s*#' }
+        Assert-True ($chamadas.Count -gt 0) "nenhuma chamada a $($caso.Funcao) encontrada"
+
+        foreach ($linha in $chamadas) {
+            Assert-True ($linha -match '-WhatIf:') `
+                "chamada sem -WhatIf: explicito (grava mesmo em modo simulacao): $($linha.Trim())"
+        }
+    }
+}
+
+It 'Set-RustDeskConfig.ps1 nao para o servico em modo simulacao' {
+    # parar o servico e efeito colateral real: um -WhatIf que derruba a sessao
+    # remota e pior do que inutil para quem esta conectado por ela.
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Set-RustDeskConfig.ps1') -Raw
+    Assert-True ($conteudo -match '\$simulando\s*=\s*\[bool\]\$WhatIfPreference') `
+        'o script nao captura $WhatIfPreference'
+    Assert-True ($conteudo -match 'if \(-not \$NoRestart -and -not \$simulando\)') `
+        'Stop-RustDeskClean nao esta guardado contra modo simulacao'
+}
+
 # limpeza
 $tmpFiles | Sort-Object -Unique | ForEach-Object { Remove-Item $_ -Force -ErrorAction SilentlyContinue }
 

@@ -63,7 +63,9 @@ $log += "herdr.exe: $($paths.Exe)"
 
 # --- editar o config.toml ---------------------------------------------
 $log += "--- config do Herdr: $($paths.Config) ---"
-$r = Set-TomlSectionValue -Path $paths.Config -Sections $sections -CreateIfMissing:$true -NoBackup:$NoBackup
+# -WhatIf explicito: $WhatIfPreference nao atravessa fronteira de modulo, entao
+# sem isto a funcao de lib\RustDeskToml.psm1 gravaria mesmo em modo simulacao.
+$r = Set-TomlSectionValue -Path $paths.Config -Sections $sections -CreateIfMissing:$true -NoBackup:$NoBackup -WhatIf:([bool]$WhatIfPreference)
 $r.Actions | ForEach-Object { $log += "  $_" }
 $log += "  alterado: $($r.Changed)"
 

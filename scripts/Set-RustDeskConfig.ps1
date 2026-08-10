@@ -44,10 +44,18 @@ $log += "chaves a aplicar: $($options.Count)"
 
 if (-not $paths.Installed) { throw 'RustDesk nao esta instalado. Rode Setup.ps1 -Install antes.' }
 
+# $WhatIfPreference NAO atravessa fronteira de modulo: as funcoes de
+# lib\*.psm1 sao chamadas com o preference do escopo DELAS, nao o deste script.
+# Sem repassar -WhatIf explicitamente, '-WhatIf' aqui gravava de verdade - e
+# ainda derrubava o servico, que e o oposto de simular.
+$simulando = [bool]$WhatIfPreference
+
 # --- parar antes de editar -------------------------------------------
-if (-not $NoRestart) {
+if (-not $NoRestart -and -not $simulando) {
     $log += '--- parando o RustDesk ---'
     $log += Stop-RustDeskClean
+} elseif ($simulando) {
+    $log += '--- (WhatIf) o RustDesk seria parado aqui ---'
 }
 
 # --- editar as duas configs ------------------------------------------
@@ -62,13 +70,16 @@ foreach ($target in @(
         $log += '  rodar alguns segundos (servico) para ele ser criado, e repita este passo.'
         continue
     }
-    $r = Set-TomlOption -Path $target.Arquivo -Options $options
+    $r = Set-TomlOption -Path $target.Arquivo -Options $options -WhatIf:$simulando
     $r.Actions | ForEach-Object { $log += "  $_" }
     $log += "  alterado: $($r.Changed)"
 }
 
 # --- subir de novo ----------------------------------------------------
-if (-not $NoRestart) {
+if ($simulando) {
+    $log += '--- (WhatIf) o RustDesk seria reiniciado aqui ---'
+    $log += 'nada foi gravado e o servico nao foi tocado.'
+} elseif (-not $NoRestart) {
     $log += '--- iniciando o RustDesk ---'
     $log += Start-RustDeskClean
     $log += Start-RustDeskUI
