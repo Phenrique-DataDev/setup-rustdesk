@@ -26,6 +26,26 @@
     # o watchdog tambem vigia esta chave.
     'stop-service'                     = 'N'
 
+    # --- caminho de conexao rapido ------------------------------------
+    # Sem isto, TODA conexao passa pelo servidor de rendezvous publico: o
+    # RustDesk tenta furar o NAT (hole punching) e, quando falha, espera o
+    # timeout antes de pedir relay. Sao ~10 segundos de "carregando" antes de
+    # qualquer imagem aparecer, e o relay publico ainda fica longe.
+    #
+    # Com direct-server, quem conecta pode digitar o IP da maquina em vez do
+    # ID: a sessao abre direto, sem rendezvous, sem punch e sem relay. Na mesma
+    # rede e imediato. De fora, exige encaminhar a porta abaixo no roteador -
+    # nenhuma config do RustDesk substitui isso.
+    #
+    # O ID continua funcionando normalmente: isto ADICIONA um caminho, nao
+    # troca o existente.
+    'direct-server'                    = 'Y'
+    'direct-access-port'               = '21118'
+
+    # Deixa a maquina aparecer sozinha na aba de descoberta dos clientes da
+    # mesma rede, sem precisar decorar o IP.
+    'enable-lan-discovery'             = 'Y'
+
     # --- recursos gerais ----------------------------------------------
     'enable-keyboard'                  = 'Y'
     'enable-clipboard'                 = 'Y'
