@@ -14,3 +14,6 @@ RustDesk2.toml
 # Windows
 Thumbs.db
 desktop.ini
+
+# Cache local de ferramenta, nao e do projeto
+.impeccable/
