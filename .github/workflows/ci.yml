@@ -1,0 +1,53 @@
+name: CI
+
+# Roda o que hoje e feito a mao antes de cada commit - e que ja pegou erro.
+# Tudo aqui e estatico ou usa arquivos temporarios: nenhum passo instala,
+# configura ou toca no RustDesk/Herdr de verdade.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verifica:
+    name: Testes e checagem estatica
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versao do PowerShell
+        shell: pwsh
+        run: $PSVersionTable | Format-List PSVersion, OS
+
+      - name: Checagem estatica (parser + ASCII)
+        shell: pwsh
+        run: |
+          ./tests/Test-Syntax.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Testes da lib de TOML
+        shell: pwsh
+        run: |
+          ./tests/RustDeskToml.Tests.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Nenhum .toml/.bak/.log versionado
+        shell: pwsh
+        run: |
+          # RustDesk.toml e RustDesk2.toml carregam hash de senha, salt e
+          # chaves do dispositivo. O .gitignore ja cobre, mas um 'git add -f'
+          # ou um caminho novo furam a regra - este passo e a rede.
+          $proibidos = git ls-files -- '*.toml' '*.bak' '*.log'
+          if ($proibidos) {
+            foreach ($f in $proibidos) {
+              Write-Host "::error file=$f::$f nao pode ser versionado (segredo ou artefato local)"
+            }
+            exit 1
+          }
+          Write-Host 'ok: nenhum .toml, .bak ou .log versionado'

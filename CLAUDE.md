@@ -57,7 +57,10 @@ mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
 - **Configuração pessoal vai em `config/custom.psd1` e `config/herdr-custom.psd1`**, que
   têm precedência e são ignorados pelo git. Não edite os defaults para preferência local.
 - Testes: `.\tests\RustDeskToml.Tests.ps1` (usa arquivos temporários, não toca em
-  instalação real).
+  instalação real) e `.\tests\Test-Syntax.ps1` (parser em todos os `.ps1` +
+  checagem de ASCII). O CI (`.github/workflows/ci.yml`) roda os dois a cada PR e push
+  na `main`, mais um guarda contra `.toml`/`.bak`/`.log` versionados. Rode-os antes de
+  commitar: falhar no CI custa um ciclo a mais.
 
 ## Armadilhas que já custaram tempo
 
