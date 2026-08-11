@@ -178,6 +178,18 @@ tirariam o `rs-ny` (~188 ms daqui). Também não envolve o roteador.
 
 ## Ideias, não compromissos
 
+- ~~O repositório virou público sem LICENSE.~~ **Feito em 2026-08-11**: sem arquivo de
+  licença o default legal é "todos os direitos reservados" — ninguém podia clonar nem
+  forkar, o oposto do que o README promete no primeiro parágrafo. Adicionado `LICENSE`
+  (MIT) e a seção *Licença*, que registra também o que este repositório **não** licencia:
+  ele não redistribui binário nenhum, só baixa os oficiais. Na mesma passada,
+  `git clone <url-do-repo>` virou a URL real — o placeholder só fazia sentido enquanto o
+  repo era privado — e o README ganhou o badge do CI.
+
+  Uma revisão de contexto limpo varreu o **histórico completo** (`git log --all -p`, 50
+  commits), não só a árvore de trabalho, atrás de segredo, `.toml` versionado em algum
+  momento e caminho de máquina pessoal: nada. Os `RustDesk*.toml` estão no `.gitignore`
+  desde o primeiro commit dele, então nunca houve janela de exposição.
 - `Setup.ps1 -Uninstall` que reverta tudo (hoje só o watchdog tem `-Uninstall`).
 - Hook de som no Windows via `SoundPlayer`, já que o do Herdr é quebrado lá — o README
   registra a rota que funciona, o repo não a instala.

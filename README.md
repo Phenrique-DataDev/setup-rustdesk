@@ -1,5 +1,7 @@
 # setup-rustdesk
 
+[![CI](https://github.com/Phenrique-DataDev/setup-rustdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Phenrique-DataDev/setup-rustdesk/actions/workflows/ci.yml)
+
 Configura a stack de acesso remoto no Windows — [RustDesk](https://rustdesk.com) para o
 transporte e [Herdr](https://herdr.dev) para o terminal — incluindo o uso da função
 **Terminal com a tela bloqueada**, que é onde a configuração padrão costuma falhar.
@@ -17,7 +19,7 @@ dois. Veja [O terminal dentro da sessão](#o-terminal-dentro-da-sessão-herdr).
 ## Início rápido
 
 ```powershell
-git clone <url-do-repo> setup-rustdesk
+git clone https://github.com/Phenrique-DataDev/setup-rustdesk.git
 cd setup-rustdesk
 
 # 1. Ver o estado atual (não altera nada, não precisa de Administrador)
@@ -855,3 +857,15 @@ Não tente isolar isso com **logoff**: sem sessão de usuário o Terminal recusa
 saída (ver [Tela bloqueada não é o mesmo que logoff](#tela-bloqueada-não-é-o-mesmo-que-logoff)),
 e você troca um sintoma por outro em vez de isolar. Para limpar um `--cm` órfão, feche a
 sessão remota, confirme com a verificação que sobrou só um, e reconecte.
+
+---
+
+## Licença
+
+[MIT](LICENSE). Os scripts e a documentação deste repositório são livres para usar,
+modificar e redistribuir.
+
+O que este repositório **não** licencia: ele não redistribui binário nenhum. O
+`Install-RustDesk.ps1` baixa o `.msi` da release oficial e o Herdr vem do instalador
+do projeto dele — cada um sob a licença do seu próprio projeto
+([RustDesk](https://github.com/rustdesk/rustdesk), [Herdr](https://herdr.dev)).
