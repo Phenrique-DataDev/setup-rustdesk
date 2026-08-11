@@ -10,3 +10,7 @@
 *.ps1  text eol=crlf
 *.psd1 text eol=crlf
 *.psm1 text eol=crlf
+
+# LICENSE nao tem extensao: sem regra, o autocrlf converteria no checkout e o
+# arquivo no disco divergiria do blob. LF e o formato canonico dele.
+LICENSE text eol=lf
