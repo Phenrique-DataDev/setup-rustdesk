@@ -3,6 +3,10 @@
 O que ficou em aberto, e por quê. Escrito em 2026-08-07, ao fim da sessão que trouxe o
 Herdr para o `-All` e abriu o suporte a Linux.
 
+Revisado em **2026-08-11**: o repositório virou público com CI obrigatório, a versão do
+RustDesk passou a ser fixada e as atualizações automáticas foram desligadas e verificadas na
+máquina. O item 5 fechou — por um motivo que ninguém esperava.
+
 Ordenado por **risco de morder**, não por esforço.
 
 ---
@@ -16,6 +20,12 @@ execução exercitou:
 |---|---|
 | `Install-Herdr.ps1`, caminho de **instalação** | a máquina de referência já tinha o Herdr |
 | `Set-RustDeskPassword.ps1`, caminho de **escrita** | a senha já estava gravada lá |
+| `Install-RustDesk.ps1`, o `msiexec` do pin (2026-08-11) | o RustDesk já estava instalado, e na versão fixada |
+
+O terceiro entrou em 2026-08-11 junto com o pin de versão. O que **foi** exercitado nesta
+máquina: o download do `.msi`, a conferência de SHA-256, a validação da assinatura
+Authenticode, a resolução de `-Version latest` pela API do GitHub e a montagem da URL. O que
+não: a chamada do `msiexec` em si, porque isso exige uma máquina sem RustDesk.
 
 **A rota do Windows Sandbox não serve para o primeiro.** O instalador oficial do Herdr usa
 `Expand-Archive`, e no Sandbox o módulo `Microsoft.PowerShell.Archive` não carrega:
@@ -140,6 +150,11 @@ conexão direta **adicionam** um caminho sem interferir no caminho autenticado p
 
 Sobra apenas o de sempre: é um ponto de dado de **uma** máquina, esta. Repita na sua.
 
+**Não revalidado após 2026-08-11.** A config mudou de novo naquele dia (`enable-check-update`
+nos dois `RustDesk.toml`, e o serviço parou e subiu no processo). É uma chave de checagem de
+atualização, sem relação plausível com autenticação na tela de logon — mas o histórico deste
+item é justamente o de revalidar a cada mudança de config, e essa não foi.
+
 Lembrar da distinção: `Win+L` funciona, **logoff não** — o Terminal exige sessão de
 console. Está no README.
 
@@ -173,6 +188,42 @@ próxima conexão externa e ver se o punch some.
 
 A alternativa restante, se nada disso bastar: hospedar `hbbs`/`hbbr` próprios, que também
 tirariam o `rs-ny` (~188 ms daqui). Também não envolve o roteador.
+
+---
+
+## 9. O pin de versão apodrece sozinho
+
+Fechado em 2026-08-11, mas com uma dívida embutida.
+
+**O que foi feito e verificado nesta máquina** (verificação elevada, `0 falhas / 0 avisos`):
+
+| Chave | Arquivo | Estado |
+|---|---|---|
+| `allow-auto-update = 'N'` | `RustDesk2.toml` (usuário e serviço) | PASS |
+| `enable-check-update = 'N'` | `RustDesk.toml` (usuário e serviço) | PASS |
+| versão instalada `1.4.9` | — | bate com o pin |
+
+O `-Configure` inseriu a seção `[options]` nos dois `RustDesk.toml`, que antes não a tinham,
+e a senha permanente sobreviveu à gravação — que era o risco real de mexer nesse arquivo
+(ele guarda hash, salt e as chaves do dispositivo). Estrutura conferida depois: nada movido,
+nada duplicado.
+
+**A dívida:** o pin é um número escrito à mão em `config/version.psd1`. Quando sair a
+1.4.10, nada no repositório avisa — a máquina continua na 1.4.9 para sempre, que é
+exatamente o que se pediu, até o dia em que uma correção de segurança importa. Não há
+processo para isso hoje.
+
+As saídas possíveis, em ordem de esforço:
+
+- olhar as releases de vez em quando à mão (o que é o estado atual, e some da memória)
+- um passo no CI que consulta a última estável e **falha ou avisa** quando o pin fica para
+  trás — barato, mas transforma o CI em algo que quebra sem ninguém ter mexido no código
+- um agente agendado que abre PR trocando `Version` e `Sha256` — o hash teria de ser
+  calculado a partir do `.msi` baixado no runner, o que é fácil, mas passa a instalar o que
+  um bot escolheu
+
+Nada disso está decidido. O comportamento seguro (ficar parado na versão fixada) é o padrão
+atual **de propósito**.
 
 ---
 
