@@ -43,6 +43,7 @@ param(
     [switch]$Test,
     [string]$ConfigFile,
     [string]$HerdrConfigFile,
+    [string]$Version,   # sobrepoe config/version.psd1; 'latest' resolve a ultima estavel
     [int]$IntervalMinutes = 10,
     [switch]$SkipHerdrInstall,
     [switch]$ShowLogs,
@@ -78,7 +79,9 @@ function Write-Passo($titulo) {
 
 if ($Install) {
     Write-Passo '1/5  Instalando RustDesk e registrando o servico'
-    & (Join-Path $PSScriptRoot 'scripts\Install-RustDesk.ps1')
+    $pInst = @{}
+    if ($Version) { $pInst.Version = $Version }
+    & (Join-Path $PSScriptRoot 'scripts\Install-RustDesk.ps1') @pInst
 }
 
 if ($Configure) {

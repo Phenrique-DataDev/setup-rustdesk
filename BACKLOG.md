@@ -83,13 +83,27 @@ Para o Linux chegar ao nível do Windows falta:
 
 ---
 
-## 5. O caminho do `winget` nunca rodou
+## 5. ~~O caminho do `winget` nunca rodou~~ — resolvido em 2026-08-11
 
-`Install-RustDesk.ps1` instala via `winget install --id RustDesk.RustDesk --scope machine`.
-Em toda execução desta sessão o RustDesk já estava instalado, então esse ramo nunca
-executou. O Sandbox não tem winget, então também não ajudou.
+Nunca rodou, e **nunca teria rodado**: ao implementar o pin de versão descobriu-se que o
+pacote `RustDesk.RustDesk` não existe mais no repositório winget.
 
-Mesmo cenário dos itens 1 e 2: fecha na próxima máquina real.
+```
+> winget search rustdesk
+No package found matching input criteria.
+```
+
+O winget local está sadio (acha outros pacotes) — foi o pacote que saiu de lá. O ramo
+inteiro estava morto.
+
+`Install-RustDesk.ps1` passou a baixar o `.msi` da release do GitHub, conferindo SHA-256
+contra o hash fixado em `config/version.psd1` e a assinatura Authenticode antes de
+executar. Isso fecha o item e é o que torna o pin possível — o winget não instalaria uma
+versão que ele nem lista.
+
+**Continua valendo o teste em máquina zerada** (itens 1 e 2): o novo caminho de download +
+`msiexec` foi exercitado em partes (download, hash, assinatura, resolução de `latest`), mas
+a instalação completa numa máquina sem RustDesk ainda não.
 
 ---
 
