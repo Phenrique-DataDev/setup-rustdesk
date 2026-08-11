@@ -77,6 +77,19 @@ Write-Host ''
 Write-Host 'Instalacao' -ForegroundColor Cyan
 Test-Item 'rustdesk.exe encontrado' $paths.Installed $paths.Exe
 
+if ($paths.Installed) {
+    $pin      = Get-RustDeskPin
+    $instalada = Get-RustDeskVersion -Exe $paths.Exe
+    if ($pin.Version -eq 'latest') {
+        Test-Item 'versao fixada' 'aviso' "config pede 'latest' - instalada: $instalada"
+    } else {
+        # Divergencia aqui nao quebra o acesso remoto, mas desfaz o proposito do
+        # pin: a maquina esta rodando algo diferente do que o repo promete.
+        Test-Item "versao instalada bate com o pin ($($pin.Version))" `
+            ($instalada -eq $pin.Version) "instalada: $instalada"
+    }
+}
+
 $svc = Get-Service -Name $paths.ServiceName -ErrorAction SilentlyContinue
 Test-Item 'servico rustdesk registrado' ([bool]$svc)
 if ($svc) {
@@ -124,6 +137,38 @@ foreach ($alvo in @(
         $atual = Get-TomlOption -Path $alvo.Arquivo -Key $k
         Test-Item "$($alvo.Nome): $k = '$($esperado[$k])'" ($atual -eq $esperado[$k]) `
             $(if ($null -eq $atual) { 'ausente do arquivo' } elseif ($atual -ne $esperado[$k]) { "encontrado: '$atual'" } else { '' })
+    }
+}
+
+# --- opcoes do RustDesk.toml (LocalConfig) ----------------------------
+# Arquivo diferente do RustDesk2.toml acima. Uma chave de LocalConfig escrita
+# no arquivo errado e ignorada em silencio, entao vale conferir onde ela caiu.
+$localFile = Join-Path $PSScriptRoot '..\config\local-custom.psd1'
+if (-not (Test-Path -LiteralPath $localFile)) {
+    $localFile = Join-Path $PSScriptRoot '..\config\local.psd1'
+}
+if (Test-Path -LiteralPath $localFile) {
+    $esperadoLocal = Import-RustDeskConfigFile -Path $localFile
+    if ($esperadoLocal.Count -gt 0) {
+        Write-Host "  --- RustDesk.toml (conforme $(Split-Path $localFile -Leaf)) ---" -ForegroundColor DarkGray
+        foreach ($alvo in @(
+            @{ Nome = 'usuario'; Arquivo = $paths.UserPassword;    Protegido = $false },
+            @{ Nome = 'servico'; Arquivo = $paths.ServicePassword; Protegido = $true  }
+        )) {
+            if ($alvo.Protegido -and -not $elevated) {
+                Test-Item "RustDesk.toml do $($alvo.Nome) legivel" 'aviso' 'requer Administrador'
+                continue
+            }
+            if (-not (Test-Path -LiteralPath $alvo.Arquivo)) {
+                Test-Item "RustDesk.toml do $($alvo.Nome) existe" 'aviso' 'nasce na primeira execucao naquele perfil'
+                continue
+            }
+            foreach ($k in $esperadoLocal.Keys) {
+                $atual = Get-TomlOption -Path $alvo.Arquivo -Key $k
+                Test-Item "$($alvo.Nome): $k = '$($esperadoLocal[$k])'" ($atual -eq $esperadoLocal[$k]) `
+                    $(if ($null -eq $atual) { 'ausente do arquivo' } elseif ($atual -ne $esperadoLocal[$k]) { "encontrado: '$atual'" } else { '' })
+            }
+        }
     }
 }
 

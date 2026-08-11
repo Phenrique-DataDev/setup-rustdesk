@@ -54,8 +54,17 @@ mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
   `--set-unlock-pin`. `Test-RustDeskSetup.ps1` já faz isso; mantenha se mexer ali.
 - Antes de commitar, confira que nenhum `.toml`, `.bak` ou `.log` entrou: eles são
   ignorados, mas `git add -f` ou um caminho novo furam a regra.
-- **Configuração pessoal vai em `config/custom.psd1` e `config/herdr-custom.psd1`**, que
-  têm precedência e são ignorados pelo git. Não edite os defaults para preferência local.
+- **Configuração pessoal vai nos `*-custom.psd1`** (`custom`, `local-custom`,
+  `version-custom`, `herdr-custom`), que têm precedência e são ignorados pelo git. Não
+  edite os defaults para preferência local.
+- **`config/default.psd1` e `config/local.psd1` não são intercambiáveis.** O RustDesk lê
+  `RustDesk2.toml` por `Config` e `RustDesk.toml` por `LocalConfig`; chave no arquivo
+  errado é **ignorada em silêncio**, sem erro. `enable-check-update` só vale no
+  `RustDesk.toml`, `allow-auto-update` só no `RustDesk2.toml`. Confira no código do
+  RustDesk antes de mover uma chave de um para o outro.
+- **A versão do RustDesk é fixada** em `config/version.psd1`, com SHA-256 e assinatura
+  conferidos antes de executar o instalador. Ao subir a versão, troque `Version` **e**
+  `Sha256` — hash desatualizado faz o instalador abortar, que é o comportamento certo.
 - Testes: `.\tests\RustDeskToml.Tests.ps1` (usa arquivos temporários, não toca em
   instalação real) e `.\tests\Test-Syntax.ps1` (parser em todos os `.ps1` +
   checagem de ASCII). O CI (`.github/workflows/ci.yml`) roda os dois a cada PR e push
@@ -87,7 +96,7 @@ afetam quem edita este repo:
 `BACKLOG.md` lista o que ficou por validar, ordenado por risco. Leia antes de propor
 trabalho novo — em especial os itens 1 e 2, que são o mesmo cenário: **numa máquina Windows
 zerada, rode `.\Setup.ps1 -All` e guarde a saída**, porque três caminhos do repo (instalação
-do Herdr, escrita da senha, e o ramo do `winget`) nunca foram executados.
+do Herdr, escrita da senha, e o download do `.msi` fixado) nunca foram executados.
 
 Suporte a Linux: `docs/linux.md`. O Herdr está automatizado e validado; o RustDesk é
 documentação, não código.

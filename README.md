@@ -119,7 +119,21 @@ errado.
 
 ## Personalizando
 
-`config/default.psd1` traz os padrões. Para mudar sem sujar o repositório:
+São quatro arquivos de configuração, e a diferença entre eles não é cosmética:
+
+| Arquivo | Governa | Vai parar em |
+|---|---|---|
+| `config/default.psd1` | opções do RustDesk | `RustDesk2.toml` (as duas) |
+| `config/local.psd1` | opções de `LocalConfig` | `RustDesk.toml` (as duas) |
+| `config/version.psd1` | versão fixada e hash do `.msi` | nada — é lido na instalação |
+| `config/herdr.psd1` | opções do Herdr | `config.toml` do Herdr |
+
+**`default.psd1` e `local.psd1` não são intercambiáveis.** O RustDesk lê `RustDesk2.toml`
+por `Config` e `RustDesk.toml` por `LocalConfig`; uma chave escrita no arquivo errado é
+ignorada em silêncio, sem erro nenhum. `enable-check-update` é uma dessas — só vale no
+`RustDesk.toml`.
+
+Para mudar sem sujar o repositório:
 
 ```powershell
 Copy-Item config\default.psd1 config\custom.psd1
@@ -181,6 +195,50 @@ corrige (veja acima). Não depende do roteador.
 Fora isso, resta hospedar `hbbs`/`hbbr` próprios, o que também tiraria o `rs-ny` — a
 ~188 ms daqui.
 
+### Versão fixada e atualizações desligadas
+
+A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.4.9` (última estável em
+2026-08-11). Sem pin, duas máquinas montadas com este repo em semanas diferentes acabam em
+versões diferentes — o oposto de *clonou, pediu, funciona*.
+
+O instalador baixa o `.msi` da release do GitHub e **só executa depois de duas conferências**:
+
+1. **SHA-256** contra o hash fixado no `version.psd1`
+2. **Assinatura Authenticode**, que precisa estar válida e conter `CN=PURSLANE`
+
+Se qualquer uma falhar, o arquivo é apagado sem ser executado e o script para com erro. Um
+pin com hash errado falha alto, em vez de instalar algo inesperado em silêncio.
+
+Para subir de versão: escolha uma release **não** marcada como *prerelease*, troque
+`Version` e `Sha256`, e rode `.\Setup.ps1 -Install`. Para escapar do pin pontualmente:
+
+```powershell
+.\Setup.ps1 -Install -Version 1.4.8      # outra versão fixa
+.\Setup.ps1 -Install -Version latest     # última estável, sem verificação de hash
+```
+
+`latest` resolve pela API do GitHub, que já exclui prerelease — o `nightly` nunca entra.
+Como a versão só é conhecida em tempo de execução, não há hash a conferir; a assinatura
+continua sendo verificada.
+
+**As atualizações automáticas ficam desligadas**, e são duas chaves em dois arquivos
+diferentes:
+
+| Chave | Arquivo | O que desliga |
+|---|---|---|
+| `allow-auto-update = 'N'` | `RustDesk2.toml` (`Config`) | a atualização automática em si |
+| `enable-check-update = 'N'` | `RustDesk.toml` (`LocalConfig`) | a checagem por nova versão |
+
+A primeira é o que importa: uma atualização no meio de um acesso remoto derruba a sessão e
+mexe no serviço. A segunda evita até a consulta.
+
+Cuidado com o prefixo, porque a semântica **inverte** (é o `option2bool` do RustDesk):
+chaves `allow-*` só ligam com `'Y'` — o padrão é desligado; chaves `enable-*` ligam com
+qualquer coisa **diferente** de `'N'` — o padrão é ligado, e só o `'N'` explícito desliga.
+
+A verificação confere as duas chaves nos quatro arquivos e compara a versão instalada com
+o pin. Divergência vira `[FALHA]`, não silêncio.
+
 ### Segurança
 
 `allow-remote-config-modification` vem como `'N'` no default: com `'Y'`, quem conecta
@@ -195,7 +253,7 @@ das configurações (*unlock_pin*) e 2FA/TOTP. Este repositório não mexe nesse
 ## O que é instalado
 
 ```
-C:\Program Files\RustDesk\           binário (via winget, --scope machine)
+C:\Program Files\RustDesk\           binário (.msi da release fixada, escopo de máquina)
 serviço "rustdesk"                   Automatic + recovery: reiniciar 3× a cada 5s
 C:\ProgramData\RustDesk\
   rustdesk-watchdog.ps1              watchdog materializado do template
@@ -629,10 +687,12 @@ o histórico da conversa, use o `Show-AgentTranscript.ps1`.
 ```
 Setup.ps1                       orquestrador
 config/default.psd1             opções do RustDesk (copie para custom.psd1)
+config/local.psd1               opções do RustDesk.toml (copie para local-custom.psd1)
+config/version.psd1             versão fixada + SHA-256 do instalador
 config/herdr.psd1               opções do Herdr (copie para herdr-custom.psd1)
 lib/RustDeskCommon.psm1         caminhos, elevação, controle do serviço
 lib/RustDeskToml.psm1           leitura/escrita do .toml preservando o formato
-scripts/Install-RustDesk.ps1    winget + serviço + recovery do SCM
+scripts/Install-RustDesk.ps1    baixa o .msi fixado, verifica, serviço + recovery
 scripts/Set-RustDeskConfig.ps1  aplica as opções nas duas configs
 scripts/Set-RustDeskPassword.ps1  senha permanente, sem eco e sem histórico
 scripts/Install-Watchdog.ps1    watchdog + tarefa agendada
@@ -666,10 +726,12 @@ não Wayland.
 - Windows PowerShell 5.1 (já vem no Windows) ou PowerShell 7+
 - Privilégios de Administrador para instalar e configurar o RustDesk (o passo do Herdr não
   eleva)
-- Acesso à internet para os dois instaladores (winget para o RustDesk, `herdr.dev` para o
-  Herdr). Sem ele, use `-SkipInstall` / `-SkipHerdrInstall` sobre instalações existentes.
-- `winget` para a instalação automática — sem ele, instale o RustDesk manualmente e use
-  `.\Setup.ps1 -Install -SkipInstall` para só registrar o serviço
+- Acesso à internet para os dois instaladores (`github.com` para o `.msi` do RustDesk,
+  `herdr.dev` para o Herdr). Sem ele, use `-SkipInstall` / `-SkipHerdrInstall` sobre
+  instalações existentes.
+- **`winget` não é mais necessário.** O pacote `RustDesk.RustDesk` foi retirado do
+  repositório winget, então a instalação baixa o `.msi` direto da release — o que também é
+  o que torna o pin de versão possível
 
 ---
 

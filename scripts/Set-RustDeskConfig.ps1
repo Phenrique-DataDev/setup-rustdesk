@@ -19,6 +19,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$ConfigFile,      # default: config/custom.psd1 se existir, senao config/default.psd1
+    [string]$LocalConfigFile, # default: config/local-custom.psd1 se existir, senao config/local.psd1
     [switch]$NoRestart        # edita sem parar/subir o servico (ele nao recarrega sozinho)
 )
 
@@ -41,6 +42,22 @@ if (-not (Test-Path -LiteralPath $ConfigFile)) { throw "arquivo de configuracao 
 $options = Import-RustDeskConfigFile -Path $ConfigFile
 $log += "opcoes carregadas de: $(Resolve-Path $ConfigFile)"
 $log += "chaves a aplicar: $($options.Count)"
+
+# --- opcoes do OUTRO arquivo de config --------------------------------
+# RustDesk2.toml e RustDesk.toml sao lidos por objetos diferentes (Config e
+# LocalConfig). Uma chave escrita no arquivo errado nao da erro: e ignorada
+# em silencio. 'enable-check-update' e uma dessas - so vale no RustDesk.toml.
+if (-not $LocalConfigFile) {
+    $lcustom  = Join-Path $PSScriptRoot '..\config\local-custom.psd1'
+    $ldefault = Join-Path $PSScriptRoot '..\config\local.psd1'
+    $LocalConfigFile = if (Test-Path -LiteralPath $lcustom) { $lcustom } else { $ldefault }
+}
+$localOptions = @{}
+if (Test-Path -LiteralPath $LocalConfigFile) {
+    $localOptions = Import-RustDeskConfigFile -Path $LocalConfigFile
+    $log += "opcoes locais carregadas de: $(Resolve-Path $LocalConfigFile)"
+    $log += "chaves locais a aplicar: $($localOptions.Count)"
+}
 
 if (-not $paths.Installed) { throw 'RustDesk nao esta instalado. Rode Setup.ps1 -Install antes.' }
 
@@ -73,6 +90,27 @@ foreach ($target in @(
     $r = Set-TomlOption -Path $target.Arquivo -Options $options -WhatIf:$simulando
     $r.Actions | ForEach-Object { $log += "  $_" }
     $log += "  alterado: $($r.Changed)"
+}
+
+# --- editar os DOIS RustDesk.toml (LocalConfig) -----------------------
+# Mesmo par usuario/servico, arquivo diferente. Estes guardam hash de senha,
+# salt e as chaves do dispositivo: a lib so mexe nas chaves pedidas dentro de
+# [options] e preserva o resto, e o .bak que ela cria carrega os mesmos
+# segredos - por isso *.bak esta no .gitignore.
+if ($localOptions.Count -gt 0) {
+    foreach ($target in @(
+        @{ Nome = 'USUARIO'; Arquivo = $paths.UserPassword },
+        @{ Nome = 'SERVICO'; Arquivo = $paths.ServicePassword }
+    )) {
+        $log += "--- RustDesk.toml do $($target.Nome): $($target.Arquivo) ---"
+        if (-not (Test-Path -LiteralPath $target.Arquivo)) {
+            $log += '  ARQUIVO NAO EXISTE - o RustDesk o cria na primeira execucao naquele perfil.'
+            continue
+        }
+        $r = Set-TomlOption -Path $target.Arquivo -Options $localOptions -WhatIf:$simulando
+        $r.Actions | ForEach-Object { $log += "  $_" }
+        $log += "  alterado: $($r.Changed)"
+    }
 }
 
 # --- subir de novo ----------------------------------------------------

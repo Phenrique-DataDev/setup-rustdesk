@@ -54,6 +54,74 @@ function Import-RustDeskConfigFile {
     return $ht.SafeGetValue()
 }
 
+function Get-RustDeskPin {
+    <#
+    .SYNOPSIS
+        Le a versao fixada de config/version.psd1 (ou version-custom.psd1).
+    .OUTPUTS
+        Hashtable mutavel com Version, Sha256, UrlTemplate e SignerSubject.
+    #>
+    [CmdletBinding()] param()
+
+    $dir     = Join-Path (Split-Path -Parent $PSScriptRoot) 'config'
+    $custom  = Join-Path $dir 'version-custom.psd1'
+    $default = Join-Path $dir 'version.psd1'
+    $file    = if (Test-Path -LiteralPath $custom) { $custom } else { $default }
+
+    $pin = Import-RustDeskConfigFile -Path $file
+    foreach ($k in 'Version', 'UrlTemplate') {
+        if (-not $pin[$k]) { throw "config de versao sem a chave ${k}: $file" }
+    }
+
+    # SafeGetValue devolve hashtable somente-leitura em algumas versoes; uma
+    # copia mutavel deixa o chamador sobrepor a versao sem tocar no arquivo.
+    return @{
+        Version       = [string]$pin['Version']
+        Sha256        = [string]$pin['Sha256']
+        UrlTemplate   = [string]$pin['UrlTemplate']
+        SignerSubject = [string]$pin['SignerSubject']
+        Source        = $file
+    }
+}
+
+function Get-RustDeskVersion {
+    <#
+    .SYNOPSIS
+        Versao do rustdesk.exe instalado, como '1.4.9'.
+    .NOTES
+        O ProductVersion do binario vem com sufixo de build ('1.4.9+67'), que
+        nao existe nas tags de release - comparar sem cortar o sufixo faria
+        toda instalacao parecer divergente do pin.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Exe)
+
+    if (-not (Test-Path -LiteralPath $Exe)) { return $null }
+    $v = (Get-Item -LiteralPath $Exe).VersionInfo.ProductVersion
+    if (-not $v) { return $null }
+    return ($v -split '[+ ]')[0].Trim()
+}
+
+function Resolve-RustDeskLatestVersion {
+    <#
+    .SYNOPSIS
+        Ultima release estavel do RustDesk, pela API do GitHub.
+    .NOTES
+        /releases/latest ja exclui prerelease - e o que mantem o 'nightly'
+        fora do caminho.
+    #>
+    [CmdletBinding()] param()
+
+    $url = 'https://api.github.com/repos/rustdesk/rustdesk/releases/latest'
+    try {
+        $r = Invoke-RestMethod -Uri $url -UseBasicParsing -Headers @{ 'User-Agent' = 'setup-rustdesk' }
+    } catch {
+        throw "nao foi possivel consultar a ultima release: $($_.Exception.Message)"
+    }
+    if (-not $r.tag_name) { throw 'a API do GitHub respondeu sem tag_name' }
+    return [string]$r.tag_name
+}
+
 function Get-RustDeskPaths {
     <#
     .SYNOPSIS
@@ -259,4 +327,5 @@ function Start-RustDeskUI {
 
 Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Get-HerdrPaths,
                               Test-HerdrServer, Import-RustDeskConfigFile,
+                              Get-RustDeskPin, Get-RustDeskVersion, Resolve-RustDeskLatestVersion,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI

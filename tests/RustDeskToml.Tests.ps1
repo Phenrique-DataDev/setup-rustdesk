@@ -311,6 +311,106 @@ It 'sem alteracao a fazer, nao cria backup' {
 }
 
 Write-Host ''
+Write-Host '=== Testes: RustDesk.toml (LocalConfig), o arquivo com a senha ===' -ForegroundColor Cyan
+
+# O RustDesk.toml nao tem secao [options] e guarda hash de senha, salt e as
+# chaves do dispositivo em chaves de topo. Escrever ali e o caminho de
+# 'enable-check-update': se a gravacao mexer no que nao devia, o custo nao e um
+# .toml estranho - e a senha permanente da maquina.
+$localToml = @(
+    "enc_id = 'ENCID_FALSO'"
+    "password = 'HASH_FALSO'"
+    "salt = 'SALT_FALSO'"
+    "key_pair = [1, 2, 3]"
+    "key_confirmed = true"
+    ""
+    "[keys_confirmed]"
+    "rs-ny = true"
+)
+
+It 'cria [options] quando o arquivo nao tem a secao' {
+    $f = New-TempToml -Lines $localToml; $script:tmpFiles += $f
+    $r = Set-TomlOption -Path $f -Options @{ 'enable-check-update' = 'N' } -NoBackup
+
+    Assert-True $r.Changed 'deveria ter mudado'
+    $txt = [System.IO.File]::ReadAllText($f)
+    Assert-True ($txt -match '(?m)^\[options\]$')            'secao [options] nao foi criada'
+    Assert-True ($txt -match "enable-check-update = 'N'")    'chave nao foi escrita'
+}
+
+It 'preserva senha, salt e chaves ao escrever em [options]' {
+    $f = New-TempToml -Lines $localToml; $script:tmpFiles += $f
+    $null = Set-TomlOption -Path $f -Options @{ 'enable-check-update' = 'N' } -NoBackup
+
+    $txt = [System.IO.File]::ReadAllText($f)
+    foreach ($linha in @(
+        "enc_id = 'ENCID_FALSO'"
+        "password = 'HASH_FALSO'"
+        "salt = 'SALT_FALSO'"
+        "key_pair = [1, 2, 3]"
+        "key_confirmed = true"
+        "[keys_confirmed]"
+        "rs-ny = true"
+    )) {
+        Assert-True ($txt -match [regex]::Escape($linha)) "linha perdida na regravacao: $linha"
+    }
+}
+
+It 'nao confunde chave de [options] com chave de topo de nome parecido' {
+    # Set-TomlOption procura a chave no arquivo inteiro, nao so dentro de
+    # [options]. Se 'password' fosse pedida como opcao, ela acertaria a chave
+    # de topo - que e o hash da senha permanente.
+    $f = New-TempToml -Lines $localToml; $script:tmpFiles += $f
+    $null = Set-TomlOption -Path $f -Options @{ 'enable-check-update' = 'N' } -NoBackup
+
+    $txt = [System.IO.File]::ReadAllText($f)
+    Assert-Equal 1 ([regex]::Matches($txt, "^password = ", 'Multiline').Count) `
+        'a chave password foi duplicada ou movida'
+}
+
+It 'e idempotente no RustDesk.toml' {
+    $f = New-TempToml -Lines $localToml; $script:tmpFiles += $f
+    $null  = Set-TomlOption -Path $f -Options @{ 'enable-check-update' = 'N' } -NoBackup
+    $r2    = Set-TomlOption -Path $f -Options @{ 'enable-check-update' = 'N' } -NoBackup
+
+    Assert-True (-not $r2.Changed) 'segunda passada deveria ser no-op'
+}
+
+Write-Host ''
+Write-Host '=== Testes: pin de versao ===' -ForegroundColor Cyan
+
+Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskCommon.psm1') -Force
+
+It 'config/version.psd1 tem os campos que o instalador exige' {
+    $pin = Get-RustDeskPin
+    Assert-True ($pin.Version     -match '^\d+\.\d+\.\d+$|^latest$') "versao invalida: '$($pin.Version)'"
+    Assert-True ($pin.UrlTemplate -match '\{0\}')                    'UrlTemplate sem o placeholder {0}'
+
+    if ($pin.Version -ne 'latest') {
+        # sem hash o instalador executaria um .msi sem conferir nada
+        Assert-True ($pin.Sha256 -match '^[0-9A-Fa-f]{64}$') "Sha256 nao parece um SHA-256: '$($pin.Sha256)'"
+    }
+}
+
+It 'a URL montada aponta para a release da versao fixada' {
+    $pin = Get-RustDeskPin
+    $url = $pin.UrlTemplate -f $pin.Version
+    Assert-True ($url -match "download/$([regex]::Escape($pin.Version))/") 'a tag na URL nao e a versao fixada'
+    Assert-True ($url -match '\.msi$')                                     'a URL nao aponta para um .msi'
+}
+
+It 'Get-RustDeskVersion corta o sufixo de build' {
+    # o binario reporta '1.4.9+67'; as tags de release nao tem o '+67'
+    $fake = Join-Path ([System.IO.Path]::GetTempPath()) ("rd-" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".txt")
+    Set-Content -LiteralPath $fake -Value 'nao e um exe' -Encoding ASCII
+    $script:tmpFiles += $fake
+
+    # arquivo sem VersionInfo devolve $null em vez de estourar
+    Assert-Equal $null (Get-RustDeskVersion -Exe $fake) 'deveria devolver null para arquivo sem versao'
+    Assert-Equal $null (Get-RustDeskVersion -Exe 'C:\caminho\que\nao\existe.exe') 'deveria devolver null para caminho inexistente'
+}
+
+Write-Host ''
 Write-Host '=== Testes: os scripts repassam -WhatIf para o modulo ===' -ForegroundColor Cyan
 
 # Regressao real: '-WhatIf' em Set-RustDeskConfig.ps1 gravava de verdade.

@@ -1,17 +1,33 @@
 <#
 .SYNOPSIS
-    Instala o RustDesk (via winget) e registra o servico do Windows.
+    Instala uma versao fixa do RustDesk e registra o servico do Windows.
 
 .DESCRIPTION
     Idempotente: se ja estiver instalado, apenas relata e garante que o
     servico exista e esteja em Automatic.
 
+    A versao vem de config/version.psd1 (ou version-custom.psd1). O .msi e
+    baixado da release do GitHub e so e executado depois de conferir o
+    SHA-256 fixado e a assinatura Authenticode.
+
+.PARAMETER Version
+    Sobrepoe a versao fixada. Use 'latest' para resolver a ultima release
+    estavel na hora - conveniente, mas sem verificacao de hash, porque nao ha
+    hash fixado para uma versao que so se conhece em tempo de execucao.
+
 .NOTES
     Exige Administrador.
+
+    O winget saiu do caminho de instalacao: o pacote RustDesk.RustDesk nao
+    existe mais no repositorio winget ('No package found matching input
+    criteria' em 2026-08-11), entao o ramo que dependia dele nunca teria como
+    funcionar. Baixar o .msi da release tambem e o que torna o pin de versao
+    possivel - o winget nao instalaria uma versao que ele nao lista.
 #>
 [CmdletBinding()]
 param(
-    [switch]$SkipInstall   # so registra/valida o servico, nao chama o winget
+    [switch]$SkipInstall,   # so registra/valida o servico, nao baixa nada
+    [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,34 +37,98 @@ Assert-Elevated
 $log = @()
 
 $paths = Get-RustDeskPaths
+$pin   = Get-RustDeskPin
+if ($Version) { $pin.Version = $Version }
 
 # --- 1) instalar o binario -------------------------------------------
 if ($paths.Installed) {
     $log += "RustDesk ja instalado: $($paths.Exe)"
+
+    # Um binario instalado fora do pin nao e erro - a maquina pode ter vindo
+    # com outra versao. Mas e exatamente o que o pin existe para tornar
+    # visivel, entao vale um aviso em vez de silencio.
+    $atual = Get-RustDeskVersion -Exe $paths.Exe
+    if ($atual -and $pin.Version -ne 'latest' -and $atual -ne $pin.Version) {
+        $log += "  AVISO: versao instalada ($atual) difere da fixada ($($pin.Version))."
+        $log += '  Para alinhar: desinstale o RustDesk e rode .\Setup.ps1 -Install de novo.'
+        $log += '  Ou fixe a versao atual em config/version-custom.psd1.'
+    } elseif ($atual) {
+        $log += "  versao: $atual (bate com o pin)"
+    }
 } elseif ($SkipInstall) {
     throw 'RustDesk nao encontrado e -SkipInstall foi usado. Instale antes de continuar.'
 } else {
-    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-    if (-not $winget) {
-        throw @'
-winget nao encontrado. Instale o "Instalador de Aplicativo" pela Microsoft Store
-ou baixe o RustDesk manualmente em https://github.com/rustdesk/rustdesk/releases
-e rode este script de novo com -SkipInstall.
-'@
+    if ($pin.Version -eq 'latest') {
+        $pin.Version = Resolve-RustDeskLatestVersion
+        $log += "versao 'latest' resolvida para $($pin.Version) - sem verificacao de hash"
+        $pin.Sha256 = ''
     }
 
-    $log += 'instalando RustDesk via winget...'
-    # --scope machine: instala em Program Files, requisito para o servico
-    & winget.exe install --id RustDesk.RustDesk --scope machine `
-        --accept-package-agreements --accept-source-agreements --silent
-    if ($LASTEXITCODE -ne 0) { throw "winget retornou codigo $LASTEXITCODE" }
+    $url = $pin.UrlTemplate -f $pin.Version
+    $msi = Join-Path ([System.IO.Path]::GetTempPath()) "rustdesk-$($pin.Version)-x86_64.msi"
+
+    $log += "baixando RustDesk $($pin.Version)..."
+    $log += "  $url"
+    try {
+        # o ProgressPreference derruba a velocidade do Invoke-WebRequest em
+        # ordens de grandeza quando ha barra de progresso para desenhar
+        $pp = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing
+    } catch {
+        throw "falha ao baixar $url : $($_.Exception.Message)"
+    } finally {
+        $ProgressPreference = $pp
+    }
+
+    $tam = (Get-Item -LiteralPath $msi).Length
+    $log += "  baixado: $([math]::Round($tam / 1MB, 1)) MB"
+
+    # --- verificacao antes de executar qualquer coisa ---
+    if ($pin.Sha256) {
+        $hash = (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash
+        if ($hash -ne $pin.Sha256.ToUpperInvariant()) {
+            Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+            throw @"
+SHA-256 do instalador nao bate com o fixado em config/version.psd1.
+  esperado: $($pin.Sha256.ToUpperInvariant())
+  obtido:   $hash
+O arquivo foi apagado sem ser executado. Se voce acabou de trocar a versao no
+config, atualize tambem o Sha256.
+"@
+        }
+        $log += '  SHA-256 confere com o pin'
+    }
+
+    $sig = Get-AuthenticodeSignature -LiteralPath $msi
+    if ($sig.Status -ne 'Valid') {
+        Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+        throw "assinatura do instalador invalida ($($sig.Status)). O arquivo foi apagado sem ser executado."
+    }
+    if ($pin.SignerSubject -and $sig.SignerCertificate.Subject -notlike "*$($pin.SignerSubject)*") {
+        Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
+        throw @"
+instalador assinado por quem nao se esperava.
+  esperado conter: $($pin.SignerSubject)
+  obtido:          $($sig.SignerCertificate.Subject)
+O arquivo foi apagado sem ser executado.
+"@
+    }
+    $log += "  assinatura valida: $($sig.SignerCertificate.Subject)"
+
+    $log += '  instalando em modo silencioso...'
+    $p = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+    if ($p.ExitCode -ne 0) {
+        throw "msiexec retornou codigo $($p.ExitCode). O .msi ficou em $msi para diagnostico."
+    }
+    Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
 
     Start-Sleep -Seconds 5
     $paths = Get-RustDeskPaths
     if (-not $paths.Installed) {
-        throw 'winget terminou mas rustdesk.exe nao foi encontrado. Verifique a instalacao.'
+        throw 'msiexec terminou mas rustdesk.exe nao foi encontrado. Verifique a instalacao.'
     }
-    $log += "instalado: $($paths.Exe)"
+    $log += "instalado: $($paths.Exe) ($(Get-RustDeskVersion -Exe $paths.Exe))"
 }
 
 # --- 2) garantir o servico -------------------------------------------

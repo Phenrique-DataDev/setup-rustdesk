@@ -1,6 +1,8 @@
 # Configuracao pessoal: tem precedencia sobre os defaults e nao vai para o repo
 config/custom.psd1
 config/herdr-custom.psd1
+config/local-custom.psd1
+config/version-custom.psd1
 
 # Saidas de execucao
 *.log
