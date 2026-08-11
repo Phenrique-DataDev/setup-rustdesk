@@ -167,5 +167,7 @@ tirariam o `rs-ny` (~188 ms daqui). Também não envolve o roteador.
 - `Setup.ps1 -Uninstall` que reverta tudo (hoje só o watchdog tem `-Uninstall`).
 - Hook de som no Windows via `SoundPlayer`, já que o do Herdr é quebrado lá — o README
   registra a rota que funciona, o repo não a instala.
-- CI que rode `tests\RustDeskToml.Tests.ps1` e o parser em todos os `.ps1` a cada PR.
-  Hoje isso é feito à mão e já pegou erro.
+- ~~CI que rode os testes e o parser a cada PR.~~ **Feito em 2026-08-11**:
+  `.github/workflows/ci.yml` roda `tests/Test-Syntax.ps1` (parser + ASCII em todos os
+  scripts) e `tests/RustDeskToml.Tests.ps1`, mais um guarda contra `.toml`/`.bak`/`.log`
+  versionados. O gate foi verificado com um script propositalmente quebrado.

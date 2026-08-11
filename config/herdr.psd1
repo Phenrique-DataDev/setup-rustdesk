@@ -35,7 +35,7 @@
         # Cada linha e cada coluna contam num celular ou numa janela remota
         # pequena, e o conteudo do agente e o que importa.
 
-        # Esconde a barra de abas quando ha só uma. Ganha uma linha; novas
+        # Esconde a barra de abas quando ha so uma. Ganha uma linha; novas
         # abas continuam em prefix+c.
         hide_tab_bar_when_single_tab = $true
 

@@ -100,6 +100,7 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
 | `.\tests\RustDeskToml.Tests.ps1` | Testes da biblioteca (em arquivos temporários) | não |
+| `.\tests\Test-Syntax.ps1` | Parser em todos os `.ps1` + checagem de ASCII | não |
 
 \* a verificação roda sem elevação, mas as checagens da config do serviço aparecem como
 `[AVISO] requer Administrador` — o diretório é protegido. A parte do Herdr mora no perfil
@@ -640,7 +641,9 @@ scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
 scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
-tests/RustDeskToml.Tests.ps1    10 testes, sem tocar em instalação real
+tests/RustDeskToml.Tests.ps1    30 testes, sem tocar em instalação real
+tests/Test-Syntax.ps1           parser + ASCII em todos os scripts
+.github/workflows/ci.yml        roda os dois a cada PR e push na main
 ```
 
 ---
