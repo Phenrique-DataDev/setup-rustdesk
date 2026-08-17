@@ -18,6 +18,9 @@ dois. Veja [O terminal dentro da sessão](#o-terminal-dentro-da-sessão-herdr).
 
 ## Início rápido
 
+> **Nunca abriu o PowerShell?** Comece pelo [tutorial passo a passo](docs/TUTORIAL.md):
+> mesmo resultado, sem assumir Git, terminal ou linha de comando.
+
 ```powershell
 git clone https://github.com/Phenrique-DataDev/setup-rustdesk.git
 cd setup-rustdesk
