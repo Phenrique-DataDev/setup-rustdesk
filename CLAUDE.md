@@ -15,9 +15,12 @@ PowerShell **como Administrador**:
 .\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')
 ```
 
-Ele executa 6 passos: instala o RustDesk → aplica as duas configs → watchdog → instala e
-configura o Herdr com o servidor no logon → grava a senha permanente → verifica. Ao final
-a máquina está pronta, sem passo manual pendente.
+Ele instala o RustDesk → aplica as duas configs → watchdog → **energia, se for notebook** →
+instala e configura o Herdr com o servidor no logon → grava a senha permanente → verifica. Ao
+final a máquina está pronta, sem passo manual pendente.
+
+O número de passos é **calculado**, não literal: o de energia é condicional. Se acrescentar um
+passo, não volte a escrever `'3/5'` na mão.
 
 ### A senha
 
@@ -44,10 +47,15 @@ mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
 ## Regras ao trabalhar aqui
 
 - **Não rode passos que alteram o sistema sem o usuário pedir.** `.\Setup.ps1` sem
-  parâmetros só verifica e é sempre seguro. `-Install`, `-Configure`, `-Watchdog` exigem
-  Administrador e mexem em serviço e configs.
-- **`-WhatIf` funciona** em `Set-RustDeskConfig.ps1`, `Set-HerdrConfig.ps1` e
-  `Install-Herdr.ps1`. Use para mostrar o efeito antes de aplicar.
+  parâmetros só verifica e é sempre seguro. `-Install`, `-Configure`, `-Watchdog` e `-Power`
+  exigem Administrador e mexem em serviço, configs e plano de energia.
+  `Get-PowerDiagnostics.ps1` é somente leitura e pode rodar à vontade.
+- **`-WhatIf` funciona** em `Set-RustDeskConfig.ps1`, `Set-HerdrConfig.ps1`,
+  `Install-Herdr.ps1`, `Set-PowerConfig.ps1` e `Install-AwakeGuard.ps1`. Use para mostrar o
+  efeito antes de aplicar.
+- **Energia só existe em notebook.** `Test-IsLaptop` decide; em desktop o passo é pulado e a
+  seção de energia nem aparece na verificação. Não force o passo numa máquina sem bateria
+  "para testar" — ele sairia limpo sem fazer nada, e é esse o comportamento certo.
 - **Nunca versione `RustDesk.toml` / `RustDesk2.toml`** — carregam hash de senha, salt e
   chaves do dispositivo. Já estão no `.gitignore`; não os force com `git add -f`.
 - **Nunca imprima linha de comando de processo sem redigir** `--password` /
@@ -55,8 +63,8 @@ mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
 - Antes de commitar, confira que nenhum `.toml`, `.bak` ou `.log` entrou: eles são
   ignorados, mas `git add -f` ou um caminho novo furam a regra.
 - **Configuração pessoal vai nos `*-custom.psd1`** (`custom`, `local-custom`,
-  `version-custom`, `herdr-custom`), que têm precedência e são ignorados pelo git. Não
-  edite os defaults para preferência local.
+  `version-custom`, `herdr-custom`, `power-custom`), que têm precedência e são ignorados
+  pelo git. Não edite os defaults para preferência local.
 - **`config/default.psd1` e `config/local.psd1` não são intercambiáveis.** O RustDesk lê
   `RustDesk2.toml` por `Config` e `RustDesk.toml` por `LocalConfig`; chave no arquivo
   errado é **ignorada em silêncio**, sem erro. `enable-check-update` só vale no
@@ -90,6 +98,15 @@ afetam quem edita este repo:
   acesso — falso negativo silencioso. Tarefas do próprio usuário (como `HerdrServer`) são
   consultáveis sem elevação.
 - **O Herdr recarrega sem reiniciar** (`herdr server reload-config`), diferente do RustDesk.
+- **`powercfg /setacvalueindex` não vale nada sem `powercfg /setactive` depois.** O valor
+  entra no esquema e o sistema segue no antigo, sem erro nenhum.
+- **Os rótulos do `powercfg` são traduzidos.** Nunca case contra `Setting Index`; localize os
+  índices pelo formato `0x00000000` (as duas últimas ocorrências são AC e DC). Há teste que
+  reprova quem voltar a casar por rótulo.
+- **`SetThreadExecutionState` é por thread.** O daemon tem que manter o laço na thread
+  principal; um `Start-Job` perderia o bloqueio em silêncio.
+- **A guarda do IPv6 no watchdog é "uma vez por época", não por boot.** Época = boot + último
+  resume. Com Fast Startup ligado o `LastBootUpTime` nem avança ao desligar e ligar.
 
 ## O que está em aberto
 
@@ -97,6 +114,10 @@ afetam quem edita este repo:
 trabalho novo — em especial os itens 1 e 2, que são o mesmo cenário: **numa máquina Windows
 zerada, rode `.\Setup.ps1 -All` e guarde a saída**, porque três caminhos do repo (instalação
 do Herdr, escrita da senha, e o download do `.msi` fixado) nunca foram executados.
+
+O item **0** é o mais novo e o mais arriscado: o suporte a notebook inteiro (energia, tampa,
+daemon, trigger de resume) foi escrito e testado estaticamente, mas **nunca rodou num
+notebook**. Peça o teste antes de construir por cima dele.
 
 Suporte a Linux: `docs/linux.md`. O Herdr está automatizado e validado; o RustDesk é
 documentação, não código.
@@ -111,6 +132,9 @@ documentação, não código.
   `[ui.sound] enabled = $false` é intencional — não "conserte" ligando de volta.
 - Nenhuma verificação cobre conectar de outra máquina com a tela bloqueada. Peça o teste
   manual (`Win+L` + conectar de outro dispositivo).
+- **Nada do passo de energia foi executado.** A máquina de referência é desktop. Fechar a
+  tampa, o daemon segurando uma suspensão e o trigger de resume disparando são todos testes
+  manuais pendentes — ver item 0 do `BACKLOG.md`.
 
 ## Idioma
 

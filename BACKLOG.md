@@ -7,7 +7,54 @@ Revisado em **2026-08-11**: o repositório virou público com CI obrigatório, a
 RustDesk passou a ser fixada e as atualizações automáticas foram desligadas e verificadas na
 máquina. O item 5 fechou — por um motivo que ninguém esperava.
 
+Revisado em **2026-08-20**: entrou o suporte a notebook (energia, tampa fechada, daemon de
+suspensão e trigger de resume no watchdog). Ele nasce inteiro no item 1 — a máquina de
+referência é um desktop, então **nenhuma linha do passo de energia foi executada**.
+
 Ordenado por **risco de morder**, não por esforço.
+
+---
+
+## 0. O suporte a notebook nunca rodou num notebook
+
+Escrito em 2026-08-20. É o item de maior risco do repositório hoje, porque é código novo que
+mexe em configuração de sistema e cujo caminho de execução ninguém percorreu.
+
+O que **foi** verificado, na máquina de referência (desktop, Windows 11 Pro 26200):
+
+- 43 testes estáticos passando, incluindo regressão de `-WhatIf` para `Set-PowerConfig.ps1`,
+  do carimbo de época do watchdog e do release do bloqueio no daemon;
+- parser e checagem de ASCII em todos os arquivos novos;
+- `Test-IsLaptop` devolvendo `$false` corretamente, o que faz o passo inteiro ser pulado;
+- `Test-RemoteSessionActive` devolvendo `$true` com uma sessão RustDesk de fato aberta;
+- `New-RustDeskResumeTrigger` produzindo um `MSFT_TaskEventTrigger` com `Delay = PT20S`.
+
+O que **não** foi, e só um notebook fecha:
+
+| O quê | Por que importa |
+|---|---|
+| Qualquer chamada de `powercfg` que grava | O par `/setacvalueindex` + `/setactive` nunca rodou. Se a conferência por releitura estiver errada, o script anuncia sucesso sem ter mudado nada. |
+| O daemon segurando uma suspensão de verdade | `SetThreadExecutionState` foi escrito, não observado. Confirmar com `powercfg /requests` durante uma sessão só de Terminal. |
+| O limiar de bateria soltando o bloqueio | Exige bateria de verdade descendo abaixo de 15%. |
+| Fechar a tampa e continuar alcançável | O teste que dá sentido ao resto. |
+| O trigger de resume disparando | `Get-ScheduledTaskInfo` do `RustDeskWatchdog` logo após acordar. |
+| O carimbo de época destravando | Suspender/acordar duas vezes e ver o watchdog tratar a segunda como época nova. |
+| `Disable-NetAdapterPowerManagement` | Mudança de hardware; só o `-WhatIf` foi coberto por teste. |
+
+**Próximo passo:** os itens 2 a 11 da seção *Verificação* do plano, num notebook real, com a
+saída guardada. Rodar `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar, para ter
+linha de base.
+
+Duas perguntas em aberto que o diagnóstico deve responder, e que motivaram o coletor:
+
+1. O que exatamente não volta ao sair do ocioso. A hipótese principal é o power saving do
+   adaptador Wi-Fi, mas é hipótese — o coletor correlaciona os eventos de resume com o
+   `watchdog.log` e o log do serviço justamente para trocar hipótese por evidência.
+2. Se, em Modern Standby, a máquina realmente atende conexão nova enquanto está em espera.
+   Ligar a conectividade em espera torna isso possível; não prova que acontece.
+
+Também não medido: **quanto o setup custa de bateria em repouso**. O watchdog a cada 10 min e
+o daemon a cada 30 s são baratos no papel; ninguém mediu.
 
 ---
 

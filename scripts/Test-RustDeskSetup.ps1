@@ -243,6 +243,146 @@ if ($task) {
     }
 }
 
+# Trigger de resume: sem ele a maquina pode passar um intervalo inteiro do
+# watchdog com o servico em estado ruim depois de acordar.
+if ($task) {
+    $temResume = [bool](@($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskEventTrigger' }).Count)
+    if ($temResume) {
+        Test-Item 'trigger de resume (acorda -> verifica)' $true
+    } else {
+        Test-Item 'trigger de resume (acorda -> verifica)' 'aviso' 'reinstale com Setup.ps1 -Watchdog para ganhar reacao imediata ao acordar'
+    }
+}
+
+# --- energia (so em notebook) ------------------------------------------
+# Em desktop esta secao nem aparece: nao ha tampa nem bateria, e avisos sobre
+# suspensao so gerariam ruido.
+if (Test-IsLaptop) {
+    Write-Host ''
+    Write-Host 'Energia (notebook)' -ForegroundColor Cyan
+
+    $powerCustom = Join-Path $PSScriptRoot '..\config\power-custom.psd1'
+    $powerFile   = if (Test-Path -LiteralPath $powerCustom) { $powerCustom }
+                   else { Join-Path $PSScriptRoot '..\config\power.psd1' }
+    $powerOpts = @{}
+    if (Test-Path -LiteralPath $powerFile) {
+        try { $powerOpts = Import-RustDeskConfigFile -Path $powerFile } catch { }
+    }
+
+    function Get-PowerOpt($nome, $padrao) {
+        if ($powerOpts.Count -gt 0 -and $powerOpts.Contains($nome)) { return $powerOpts[$nome] }
+        return $padrao
+    }
+
+    # Os rotulos do powercfg sao traduzidos em Windows localizado; o formato
+    # 0x00000000 dos indices nao e. Mesma armadilha do IsInRole com string.
+    function Read-Indices($sub, $setting) {
+        $saida = (& powercfg /q SCHEME_CURRENT $sub $setting 2>&1 | Out-String)
+        $m = [regex]::Matches($saida, '0x[0-9A-Fa-f]{8}')
+        if ($m.Count -lt 2) { return $null }
+        return @{
+            Ac = [Convert]::ToInt64($m[$m.Count - 2].Value, 16)
+            Dc = [Convert]::ToInt64($m[$m.Count - 1].Value, 16)
+        }
+    }
+
+    $lid = Read-Indices 'SUB_BUTTONS' 'LIDACTION'
+    if (-not $lid) {
+        Test-Item 'acao ao fechar a tampa' 'aviso' 'o plano ativo nao expoe LIDACTION'
+    } else {
+        $alvoAc = [int](Get-PowerOpt 'LidActionAC' 0)
+        $alvoDc = [int](Get-PowerOpt 'LidActionDC' 0)
+        Test-Item 'acao ao fechar a tampa = nada (AC e DC)' `
+            ($lid.Ac -eq $alvoAc -and $lid.Dc -eq $alvoDc) `
+            "AC=$($lid.Ac) DC=$($lid.Dc) (0 = nada, 1 = suspender, 2 = hibernar, 3 = desligar)"
+    }
+
+    $standby = Read-Indices 'SUB_SLEEP' 'STANDBYIDLE'
+    if ($standby) {
+        Test-Item 'na tomada nunca suspende por ociosidade' ($standby.Ac -eq 0) "AC=$($standby.Ac)s"
+        $dcAlvo = [int](Get-PowerOpt 'StandbyIdleDC' 1800)
+        Test-Item 'na bateria suspende conforme o .psd1' ($standby.Dc -eq $dcAlvo) `
+            "DC=$($standby.Dc)s (esperado $dcAlvo; o daemon e que segura durante a sessao)"
+    }
+
+    $hib = Read-Indices 'SUB_SLEEP' 'HIBERNATEIDLE'
+    if ($hib -and ($hib.Ac -ne 0 -or $hib.Dc -ne 0)) {
+        Test-Item 'nunca hibernar por ociosidade' 'aviso' `
+            "AC=$($hib.Ac)s DC=$($hib.Dc)s - hibernar derruba o servico e a sessao do Herdr"
+    } elseif ($hib) {
+        Test-Item 'nunca hibernar por ociosidade' $true
+    }
+
+    $estadosSuspensao = (& powercfg /a 2>&1 | Out-String)
+    if ($estadosSuspensao -match 'S0') {
+        $conn = Read-Indices 'SUB_NONE' 'F15576E8-98B7-4186-B944-EAFA664402D9'
+        if (-not $conn) {
+            Test-Item 'conectividade de rede em espera' 'aviso' 'Modern Standby presente, mas o plano nao expoe a chave'
+        } else {
+            $alvoConn = [int](Get-PowerOpt 'ConnectivityInStandby' 1)
+            Test-Item 'conectividade de rede em espera' ($conn.Ac -eq $alvoConn -and $conn.Dc -eq $alvoConn) `
+                "AC=$($conn.Ac) DC=$($conn.Dc) (esperado $alvoConn)"
+        }
+    } else {
+        Write-Host '  [PULADO] conectividade em espera: maquina sem Modern Standby' -ForegroundColor DarkGray
+    }
+
+    # --- daemon ---
+    Test-Item 'script do daemon RustDeskAwake instalado' (Test-Path -LiteralPath $paths.AwakeScript) $paths.AwakeScript
+    $awake = Get-ScheduledTask -TaskName $paths.AwakeTask -ErrorAction SilentlyContinue
+    if (-not $awake -and -not $elevated) {
+        Test-Item 'tarefa RustDeskAwake registrada' 'aviso' 'requer Administrador para consultar tarefas de SYSTEM'
+    } else {
+        Test-Item 'tarefa RustDeskAwake registrada' ([bool]$awake)
+    }
+    if ($awake) {
+        $ai = Get-ScheduledTaskInfo -TaskName $paths.AwakeTask -ErrorAction SilentlyContinue
+        if ($ai) {
+            # 267009 = 0x41301 = SCHED_S_TASK_RUNNING. O daemon roda em foreground,
+            # entao esse e o valor saudavel - um 0 ali significaria que ele saiu.
+            if ($ai.LastTaskResult -eq 267009) {
+                Test-Item 'daemon em execucao' $true "ultima execucao: $($ai.LastRunTime)"
+            } else {
+                Test-Item 'daemon em execucao' 'aviso' `
+                    "LastTaskResult $($ai.LastTaskResult) (esperado 267009 = em execucao)"
+            }
+        }
+    }
+
+    # --- adaptador de rede ---
+    $nicsUp = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })
+    foreach ($nic in $nicsUp) {
+        $pm = Get-NetAdapterPowerManagement -Name $nic.Name -ErrorAction SilentlyContinue
+        if (-not $pm) { continue }
+        if ($pm.AllowComputerToTurnOffDevice -eq 'Enabled') {
+            Test-Item "adaptador '$($nic.Name)': o Windows nao pode desliga-lo" 'aviso' `
+                'com isto ligado a rede pode demorar a voltar depois de acordar'
+        } else {
+            Test-Item "adaptador '$($nic.Name)': o Windows nao pode desliga-lo" $true
+        }
+    }
+
+    # --- Fast Startup: so avisa, nao e alterado por este repositorio ---
+    $hb = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' `
+                           -Name HiberbootEnabled -ErrorAction SilentlyContinue
+    if ($hb -and $hb.HiberbootEnabled -eq 1) {
+        Test-Item 'Fast Startup' 'aviso' `
+            'ligado: desligar e ligar nao avanca o LastBootUpTime. O watchdog ja carimba a epoca com boot + resume por causa disso.'
+    } else {
+        Test-Item 'Fast Startup desligado' $true 'desligar e ligar e um boot de verdade'
+    }
+
+    # --- quem segura a maquina acordada agora ---
+    $req    = (& powercfg /requests 2>&1 | Out-String)
+    $temReq = [bool]($req -match '(?m)^\[(DRIVER|PROCESS|SERVICE)\]')
+    $sessao = Test-RemoteSessionActive
+    Write-Host "          sessao remota agora: $(if ($sessao) { 'ATIVA' } else { 'nenhuma' }); bloqueios de energia ativos: $(if ($temReq) { 'sim' } else { 'nao' })" -ForegroundColor DarkGray
+    if ($sessao -and -not $temReq) {
+        Test-Item 'ha sessao remota e algo segurando a maquina acordada' 'aviso' `
+            'o daemon deveria ter registrado um SYSTEM em powercfg /requests'
+    }
+}
+
 # --- processos ---------------------------------------------------------
 Write-Host ''
 Write-Host 'Processos' -ForegroundColor Cyan

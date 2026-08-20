@@ -22,7 +22,11 @@
     O reinicio e deliberadamente conservador - ele derruba sessao ativa:
       - so age se a maquina TEM IPv6 global agora (senao reiniciaria para
         sempre, a cada passada, numa rede que nunca vai ter IPv6);
-      - no maximo UMA vez por boot, marcado em disco;
+      - no maximo UMA vez por epoca, marcado em disco. Epoca = ultimo boot
+        MAIS ultimo resume de suspensao: num notebook, que suspende varias
+        vezes por dia sem reiniciar, so o boot faria uma recusa gravada de
+        manha valer ate o dia seguinte. Com Fast Startup ligado o problema e
+        pior ainda - desligar e ligar nao avanca o LastBootUpTime;
       - nunca com sessao remota em curso (processo --cm no ar).
 
     Instalado por scripts/Install-Watchdog.ps1, que substitui os marcadores
@@ -57,7 +61,38 @@ function Write-Log($msg) {
     }
 }
 
+function Get-LastResume {
+    # Kernel-Power 107 e o resume; Power-Troubleshooter 1 e o fallback.
+    # Devolve $null em maquina que nunca suspendeu.
+    foreach ($f in @(
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power';         Id = 107 },
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Power-Troubleshooter'; Id = 1 }
+    )) {
+        try {
+            $ev = Get-WinEvent -FilterHashtable $f -MaxEvents 1 -ErrorAction Stop
+            if ($ev) { return $ev.TimeCreated }
+        } catch { }
+    }
+    return $null
+}
+
+function Get-EpochStamp {
+    # Carimbo de "uma tentativa por epoca". Boot sozinho nao serve em portatil.
+    $boot = try { (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('o') } catch { '-' }
+    $r    = Get-LastResume
+    $rs   = if ($r) { $r.ToString('o') } else { '-' }
+    return "$boot|$rs"
+}
+
 Write-Log 'Watchdog iniciado.'
+
+# Sem esta linha, ler o log depois de um problema nao permite distinguir
+# "nunca dormiu" de "acordou tres vezes".
+$ultimoResume = Get-LastResume
+if ($ultimoResume) {
+    $ha = [int]((Get-Date) - $ultimoResume).TotalMinutes
+    Write-Log "Ultimo retorno de suspensao: $($ultimoResume.ToString('yyyy-MM-dd HH:mm:ss')) (ha $ha min)."
+}
 
 if (-not (Test-Path $exe)) {
     Write-Log "ERRO: $exe nao encontrado. Watchdog encerrado."
@@ -135,12 +170,14 @@ if ($svcLogDir -and (Test-Path $svcLogDir)) {
             $falhouIPv6 = [bool]($linhas | Select-String -Pattern 'Failed to (get public IPv6|bind IPv6)' -Quiet)
 
             if ($falhouIPv6 -and -not $achouIPv6) {
-                # Uma vez por boot. Sem isto, um STUN fora do ar viraria um
-                # reinicio a cada passada do watchdog, para sempre.
-                $stamp     = "$logFile.ipv6-restart"
-                $bootAtual = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('o')
-                $jaTentou  = (Test-Path $stamp) -and
-                             ((Get-Content $stamp -ErrorAction SilentlyContinue | Select-Object -First 1) -eq $bootAtual)
+                # Uma vez por epoca. Sem isto, um STUN fora do ar viraria um
+                # reinicio a cada passada do watchdog, para sempre. A epoca
+                # inclui o ultimo resume, e nao so o boot: num notebook a
+                # guarda por boot viraria uma trava permanente ate reiniciar.
+                $stamp      = "$logFile.ipv6-restart"
+                $epocaAtual = Get-EpochStamp
+                $jaTentou   = (Test-Path $stamp) -and
+                              ((Get-Content $stamp -ErrorAction SilentlyContinue | Select-Object -First 1) -eq $epocaAtual)
 
                 # Reiniciar derruba quem estiver conectado. O connection manager
                 # (--cm) so existe enquanto ha sessao remota.
@@ -148,12 +185,12 @@ if ($svcLogDir -and (Test-Path $svcLogDir)) {
                                    Where-Object { $_.CommandLine -match '--cm' })
 
                 if ($jaTentou) {
-                    Write-Log 'Servico sem IPv6, mas ja foi reiniciado por isso neste boot. Nao insistindo.'
+                    Write-Log 'Servico sem IPv6, mas ja foi reiniciado por isso nesta sessao (mesmo boot e mesmo resume). Nao insistindo.'
                 } elseif ($emSessao) {
                     Write-Log 'Servico sem IPv6, mas ha sessao remota ativa. Adiando para a proxima passada.'
                 } else {
                     Write-Log 'Servico subiu sem IPv6 (corrida no boot) e a maquina tem IPv6 global. Reiniciando.'
-                    Set-Content -LiteralPath $stamp -Value $bootAtual -Encoding ASCII
+                    Set-Content -LiteralPath $stamp -Value $epocaAtual -Encoding ASCII
                     Restart-Service -Name rustdesk -Force -ErrorAction SilentlyContinue
                     Start-Sleep -Seconds 12
 

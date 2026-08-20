@@ -2,6 +2,7 @@
 config/custom.psd1
 config/herdr-custom.psd1
 config/local-custom.psd1
+config/power-custom.psd1
 config/version-custom.psd1
 
 # Saidas de execucao

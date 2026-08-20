@@ -13,7 +13,10 @@
 [CmdletBinding()] param()
 
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskToml.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskToml.psm1')   -Force
+Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskCommon.psm1') -Force
+
+$repoRaiz = Split-Path -Parent $PSScriptRoot
 
 $script:passou = 0
 $script:falhou = 0
@@ -447,6 +450,107 @@ It 'Set-RustDeskConfig.ps1 nao para o servico em modo simulacao' {
         'o script nao captura $WhatIfPreference'
     Assert-True ($conteudo -match 'if \(-not \$NoRestart -and -not \$simulando\)') `
         'Stop-RustDeskClean nao esta guardado contra modo simulacao'
+}
+
+
+Write-Host ''
+Write-Host '=== Testes: energia (notebook) ===' -ForegroundColor Cyan
+
+It 'Set-PowerConfig.ps1 guarda cada efeito colateral contra modo simulacao' {
+    # powercfg e Disable-NetAdapterPowerManagement sao efeito real: um -WhatIf
+    # que reconfigura a maquina e pior do que inutil. Diferente do .toml, aqui
+    # nao ha funcao de lib no meio - a guarda tem que estar em cada chamada.
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Set-PowerConfig.ps1') -Raw
+    Assert-True ($conteudo -match '\$simulando\s*=\s*\[bool\]\$WhatIfPreference') `
+        'o script nao captura $WhatIfPreference'
+    Assert-True ($conteudo -match 'if \(\$mudou -and -not \$simulando\)') `
+        'powercfg /setactive nao esta guardado contra modo simulacao'
+
+    $linhas = Get-Content -LiteralPath (Join-Path $scriptsDir 'Set-PowerConfig.ps1')
+    $grava = $linhas | Where-Object {
+        $_ -match 'setacvalueindex|setdcvalueindex|Disable-NetAdapterPowerManagement' -and $_ -notmatch '^\s*#'
+    }
+    Assert-True ($grava.Count -gt 0) 'nenhuma chamada de escrita encontrada'
+
+    # cada escrita tem que vir depois de um ShouldProcess no mesmo bloco
+    $texto = $conteudo
+    Assert-True (([regex]::Matches($texto, 'ShouldProcess')).Count -ge 2) `
+        'faltam guardas ShouldProcess antes das escritas'
+}
+
+It 'Set-PowerConfig.ps1 confirma o valor em vez de afirmar que gravou' {
+    # powercfg nao devolve exit code confiavel: sem reler, o script anunciaria
+    # sucesso numa maquina onde nada mudou.
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Set-PowerConfig.ps1') -Raw
+    Assert-True ($conteudo -match 'Read-PowerIndex') 'nao ha releitura dos indices'
+    Assert-True ($conteudo -match '\$falhas\s*\+=') 'divergencia apos gravar nao vira falha'
+}
+
+It 'a leitura dos indices do powercfg nao depende de rotulo traduzido' {
+    # Em Windows pt-BR os rotulos do powercfg sao traduzidos: casar contra
+    # 'Current AC Power Setting Index' daria falso negativo, mesma familia de
+    # armadilha do IsInRole com string. O que nao muda e o formato do valor.
+    foreach ($arq in @('Set-PowerConfig.ps1', 'Test-RustDeskSetup.ps1', 'Get-PowerDiagnostics.ps1')) {
+        $caminho = Join-Path $scriptsDir $arq
+        $bruto   = Get-Content -LiteralPath $caminho -Raw
+
+        Assert-True ($bruto -match '0x\[0-9A-Fa-f\]\{8\}') `
+            "$arq nao usa o formato do valor para localizar os indices"
+
+        # so as linhas que de fato casam texto - o comentario que explica a
+        # armadilha cita a frase em ingles de proposito.
+        $casadoras = (Get-Content -LiteralPath $caminho) |
+                     Where-Object { $_ -match '(-match|-like|Select-String)' }
+        foreach ($linha in $casadoras) {
+            Assert-True ($linha -notmatch 'Setting Index') `
+                "$arq casa contra rotulo traduzivel do powercfg: $($linha.Trim())"
+        }
+    }
+}
+
+It 'o carimbo de epoca do watchdog inclui o resume, nao so o boot' {
+    # Num notebook, carimbar so o LastBootUpTime transforma a guarda "uma vez
+    # por boot" numa trava: a maquina suspende varias vezes por dia sem
+    # reiniciar, e uma recusa gravada de manha valeria ate o proximo boot.
+    $tpl = Get-Content -LiteralPath (Join-Path $repoRaiz 'scripts\watchdog\rustdesk-watchdog.ps1') -Raw
+    Assert-True ($tpl -match 'function Get-EpochStamp') 'o template nao define Get-EpochStamp'
+    Assert-True ($tpl -match 'Get-LastResume') 'o template nao consulta o ultimo resume'
+    Assert-True ($tpl -notmatch '\$bootAtual') 'o carimbo antigo (so boot) ainda esta em uso'
+    Assert-True ($tpl -match 'Set-Content -LiteralPath \$stamp -Value \$epocaAtual') `
+        'o stamp gravado nao e o carimbo de epoca'
+}
+
+It 'o daemon solta o bloqueio ao sair' {
+    # Um daemon morto deixando a maquina insone para sempre e pior do que nao
+    # ter daemon nenhum.
+    $tpl = Get-Content -LiteralPath (Join-Path $repoRaiz 'scripts\awake\rustdesk-awake.ps1') -Raw
+    Assert-True ($tpl -match 'finally') 'nao ha finally que solte o bloqueio'
+    Assert-True ($tpl -match 'PowerShell.Exiting') 'nao ha handler de saida do host'
+    # ES_DISPLAY_REQUIRED de fora de proposito: em notebook o painel e o maior
+    # consumidor isolado, e segurar a tela acesa nao ajuda uma sessao de Terminal.
+    # O teste olha a VARIAVEL, nao a mencao: o cabecalho do template explica a
+    # decisao em prosa e nao pode reprovar por isso.
+    Assert-True ($tpl -notmatch '\$ES_DISPLAY_REQUIRED') `
+        'ES_DISPLAY_REQUIRED nao deve ser usado: o painel pode apagar'
+    Assert-True ($tpl -match '\$ES_CONTINUOUS -bor \$ES_SYSTEM_REQUIRED') `
+        'o bloqueio nao usa ES_CONTINUOUS | ES_SYSTEM_REQUIRED'
+}
+
+It 'config/power.psd1 tem as chaves que os scripts leem' {
+    $power = Import-RustDeskConfigFile -Path (Join-Path $repoRaiz 'config\power.psd1')
+    foreach ($k in @('LidActionAC', 'LidActionDC', 'StandbyIdleAC', 'StandbyIdleDC',
+                     'HibernateIdleAC', 'HibernateIdleDC', 'VideoIdleAC', 'VideoIdleDC',
+                     'ConnectivityInStandby', 'DisableNicPowerSaving',
+                     'KeepAwakeWhileConnected', 'KeepAwakePollSeconds',
+                     'KeepAwakeMinBatteryPercent')) {
+        Assert-True ($power.Contains($k)) "config/power.psd1 sem a chave $k"
+    }
+    # A tampa nao pode suspender: e a decisao central do suporte a notebook.
+    Assert-Equal 0 $power['LidActionAC'] 'LidActionAC deveria ser 0 (nao fazer nada)'
+    Assert-Equal 0 $power['LidActionDC'] 'LidActionDC deveria ser 0 (nao fazer nada)'
+    # O daemon precisa reagir antes de a maquina dormir.
+    Assert-True ($power['KeepAwakePollSeconds'] -lt $power['StandbyIdleDC']) `
+        'KeepAwakePollSeconds precisa ser menor que StandbyIdleDC'
 }
 
 # limpeza

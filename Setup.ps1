@@ -22,6 +22,12 @@
     setup termina apontando que ela falta - nenhum script inventa uma senha.
 
 .EXAMPLE
+    .\Setup.ps1 -Power
+    So o passo de energia: ajusta o plano (tampa, suspensao, painel, rede) e
+    instala o daemon que impede a maquina de dormir com sessao remota aberta.
+    So faz algo em notebook. Exige Administrador.
+
+.EXAMPLE
     .\Setup.ps1 -Configure
     So reaplica as opcoes das configs do RustDesk. Exige Administrador.
 
@@ -39,6 +45,8 @@ param(
     [switch]$Install,
     [switch]$Configure,
     [switch]$Watchdog,
+    [switch]$Power,
+    [switch]$SkipPower,
     [switch]$Herdr,
     [switch]$Test,
     [string]$ConfigFile,
@@ -53,13 +61,18 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\RustDeskCommon.psm1') -Force
 
-if ($All) { $Install = $Configure = $Watchdog = $Herdr = $Test = $true }
+if ($All) {
+    $Install = $Configure = $Watchdog = $Herdr = $Test = $true
+    # Energia so entra em portatil. Em desktop nao ha tampa nem bateria para
+    # tratar, e mexer no plano de energia de graca seria efeito colateral.
+    $Power = (Test-IsLaptop) -and -not $SkipPower
+}
 
 # nada pedido: so verifica, que e a acao segura
-if (-not ($Install -or $Configure -or $Watchdog -or $Herdr -or $Test)) { $Test = $true }
+if (-not ($Install -or $Configure -or $Watchdog -or $Power -or $Herdr -or $Test)) { $Test = $true }
 
 # o passo do Herdr fica de fora: ele mora no perfil do usuario e nao eleva
-$precisaAdmin = $Install -or $Configure -or $Watchdog
+$precisaAdmin = $Install -or $Configure -or $Watchdog -or $Power
 if ($precisaAdmin -and -not (Test-Elevated)) {
     Write-Host ''
     Write-Host 'Este modo exige privilegios de Administrador.' -ForegroundColor Red
@@ -70,34 +83,50 @@ if ($precisaAdmin -and -not (Test-Elevated)) {
     exit 1
 }
 
+# A numeracao era literal ('1/5'...'6/6') e passou a mentir assim que o passo de
+# energia virou condicional. Contar antes e o unico jeito de o titulo bater com o
+# que vai rodar de fato.
+$totalPassos = @($Install, $Configure, $Watchdog, $Power, $Herdr, [bool]$Password, $Test |
+                 Where-Object { $_ }).Count
+$passoAtual  = 0
+
 function Write-Passo($titulo) {
+    $script:passoAtual++
     Write-Host ''
     Write-Host ('=' * 64) -ForegroundColor Cyan
-    Write-Host " $titulo" -ForegroundColor Cyan
+    Write-Host " $script:passoAtual/$script:totalPassos  $titulo" -ForegroundColor Cyan
     Write-Host ('=' * 64) -ForegroundColor Cyan
 }
 
 if ($Install) {
-    Write-Passo '1/5  Instalando RustDesk e registrando o servico'
+    Write-Passo 'Instalando RustDesk e registrando o servico'
     $pInst = @{}
     if ($Version) { $pInst.Version = $Version }
     & (Join-Path $PSScriptRoot 'scripts\Install-RustDesk.ps1') @pInst
 }
 
 if ($Configure) {
-    Write-Passo '2/5  Aplicando a configuracao nas duas configs do RustDesk'
+    Write-Passo 'Aplicando a configuracao nas duas configs do RustDesk'
     $p = @{}
     if ($ConfigFile) { $p['ConfigFile'] = $ConfigFile }
     & (Join-Path $PSScriptRoot 'scripts\Set-RustDeskConfig.ps1') @p
 }
 
 if ($Watchdog) {
-    Write-Passo '3/5  Instalando o watchdog'
+    Write-Passo 'Instalando o watchdog'
     & (Join-Path $PSScriptRoot 'scripts\Install-Watchdog.ps1') -IntervalMinutes $IntervalMinutes
 }
 
+# Depois do watchdog e antes do Herdr: o daemon de energia e infraestrutura da
+# maquina, como o watchdog, e nao depende do terminal da sessao.
+if ($Power) {
+    Write-Passo 'Ajustando energia para notebook (tampa, suspensao, rede)'
+    & (Join-Path $PSScriptRoot 'scripts\Set-PowerConfig.ps1')
+    & (Join-Path $PSScriptRoot 'scripts\Install-AwakeGuard.ps1')
+}
+
 if ($Herdr) {
-    Write-Passo '4/5  Instalando e configurando o Herdr (terminal da sessao)'
+    Write-Passo 'Instalando e configurando o Herdr (terminal da sessao)'
     $p = @{}
     if ($SkipHerdrInstall) { $p['SkipInstall'] = $true }
     & (Join-Path $PSScriptRoot 'scripts\Install-Herdr.ps1') @p
@@ -112,12 +141,12 @@ if ($Herdr) {
 # vira um comando. Sem ela o comportamento e o de antes: o Test aponta o que
 # falta.
 if ($Password) {
-    Write-Passo '5/6  Definindo a senha permanente'
+    Write-Passo 'Definindo a senha permanente'
     & (Join-Path $PSScriptRoot 'scripts\Set-RustDeskPassword.ps1') -Password $Password
 }
 
 if ($Test) {
-    Write-Passo $(if ($Password) { '6/6  Verificando' } else { '5/5  Verificando' })
+    Write-Passo 'Verificando'
     $p = @{}
     if ($ConfigFile)      { $p['ConfigFile']      = $ConfigFile }
     if ($HerdrConfigFile) { $p['HerdrConfigFile'] = $HerdrConfigFile }
