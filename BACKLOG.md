@@ -179,12 +179,52 @@ a instalação completa numa máquina sem RustDesk ainda não.
 ## 6. Windows Sandbox ficou instável
 
 Depois de duas execuções bem-sucedidas, o `LogonCommand` do `.wsb` parou de disparar — dois
-ciclos seguidos sem gravar nada, com o Sandbox de pé. Não foi investigado.
+ciclos seguidos sem gravar nada, com o Sandbox de pé.
 
 Os artefatos ficaram em `Documents\Claude\sandbox-teste-rustdesk\` (fora do repositório):
 `teste.wsb`, `teste-no-sandbox.ps1`, `diagnostico-ordem.ps1` e `saida\resultado.txt` do
 teste que completou. O `diagnostico-ordem.ps1` mediria quando cada config nasce e a partir
 de que momento `--password` funciona — nunca chegou a rodar.
+
+**Investigado em 2026-08-21, sem causa raiz encontrada — a evidência já não existia.**
+
+O que a apuração mostrou:
+
+- `teste.wsb` e `diagnostico.wsb` são idênticos exceto pelo `<Command>` do
+  `LogonCommand`. Não é problema de config — o primeiro provou que o `.wsb` funciona.
+- Os dois scripts gravam no arquivo de saída como primeira instrução. `resultado.txt`
+  existe e está completo até `=== FIM ===`; nenhum `diagnostico.txt` foi criado. Ou seja,
+  quando parou de disparar, **nem a primeira linha do script chegou a rodar** — o
+  `powershell.exe` nunca foi lançado pelo Sandbox, ou morreu antes de qualquer I/O. Não é
+  bug no `diagnostico-ordem.ps1`.
+- Os canais de evento relevantes (`Microsoft-Windows-Containers-Wcifs/Operational`,
+  `...-BindFlt/Operational`) só retêm ~5 entradas nesta máquina; a mais antiga é de
+  17/08. O incidente foi em 06/08 e já saiu da janela de retenção. Nenhum log de
+  Application/System com "Sandbox" nos últimos 30 dias.
+- `Get-ScheduledTask` para a tarefa de refresh da imagem base do Sandbox
+  (`\Microsoft\Windows\ContainerManager\WimUpdate`) voltou vazia, mas a consulta não
+  estava elevada — é a mesma armadilha já documentada no `CLAUDE.md` deste repo
+  (`Get-ScheduledTask` sem elevação devolve vazio para tarefas de SYSTEM, falso
+  negativo). Não dá para concluir que a tarefa não existe a partir disso.
+- Nenhuma atualização do Windows caiu entre 06/08 e a data do teste (`Get-HotFix` mostra
+  o KB mais recente anterior em 19/07) — descarta reinício por Windows Update como causa.
+
+Hipóteses que seguem em aberto, sem como confirmar ou descartar agora: a imagem base do
+Sandbox sendo atualizada em segundo plano, contenção de memória, ou uma corrida entre a
+montagem das pastas mapeadas e o disparo do logon.
+
+**Próximo passo:** só se resolve ao vivo, na próxima vez que acontecer — retroativamente
+não há mais nada a apurar.
+
+- Antes de abrir o Sandbox, checar elevado:
+  `Get-ScheduledTaskInfo -TaskName WimUpdate -TaskPath '\Microsoft\Windows\ContainerManager\'`
+- Ao ver o `LogonCommand` falhar, checar o Gerenciador de Tarefas por `vmwp.exe`/`vmmem`
+  (sinal de contenção) antes de fechar o Sandbox.
+- Trocar o `LogonCommand` por algo que grave fora do PowerShell primeiro (ex.:
+  `cmd /c echo cheguei > C:\saida\heartbeat.txt`), para diferenciar "não disparou" de
+  "disparou e morreu dentro do PowerShell".
+
+Não é um problema de código deste repositório — é ambiente/ferramenta do Sandbox.
 
 ---
 
