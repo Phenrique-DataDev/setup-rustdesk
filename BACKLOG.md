@@ -11,6 +11,10 @@ Revisado em **2026-08-20**: entrou o suporte a notebook (energia, tampa fechada,
 suspensão e trigger de resume no watchdog). Ele nasce inteiro no item 1 — a máquina de
 referência é um desktop, então **nenhuma linha do passo de energia foi executada**.
 
+Revisado em **2026-08-21**: fecharam os itens 4, 6, 8 e 9. Os três primeiros por decisão —
+Linux fica documentado, o Sandbox saiu da rota de teste e os ~10 s já tinham decisão tomada.
+O 9 por implementação: o CI passou a avisar quando o pin do RustDesk fica para trás.
+
 Ordenado por **risco de morder**, não por esforço.
 
 ---
@@ -135,7 +139,13 @@ Exige root e senha interativa; ficou para quem opera a máquina decidir.
 
 ---
 
-## 4. RustDesk no Linux é só documentação
+## 4. ~~RustDesk no Linux é só documentação~~ — fechado em 2026-08-21
+
+**Fechado por decisão de escopo, não por implementação.** O Linux fica como está: o Herdr
+automatizado e validado, o RustDesk documentado. Não há máquina Linux com ambiente gráfico
+para validar nada disso, e escrever `setup.sh` sem poder executá-lo produziria o mesmo tipo
+de código não exercitado que os itens 0 a 2 já custam caro. Se um dia houver a máquina,
+o que falta continua registrado abaixo.
 
 `docs/linux.md` descreve instalação, unit systemd, as duas configs e a armadilha do Wayland
 — tudo vindo da documentação oficial e do código-fonte (`res/rustdesk.service`,
@@ -176,7 +186,15 @@ a instalação completa numa máquina sem RustDesk ainda não.
 
 ---
 
-## 6. Windows Sandbox ficou instável
+## 6. ~~Windows Sandbox ficou instável~~ — fechado em 2026-08-21
+
+**Fechado sem causa raiz, e é o desfecho certo.** A investigação do mesmo dia (registrada
+abaixo) esgotou o que havia: a evidência expirou na retenção dos canais de evento e não é
+bug deste repositório — é ambiente do Sandbox. Some disso, o Sandbox **deixou de ser a rota
+de teste**: o item 1 já concluiu que validar o `Install-Herdr.ps1` exige uma VM Hyper-V com
+imagem completa, porque `Expand-Archive` não carrega lá. Manter isto aberto era guardar um
+item que nada destrava. As checagens sugeridas abaixo continuam valendo se alguém voltar a
+usar o Sandbox por outro motivo.
 
 Depois de duas execuções bem-sucedidas, o `LogonCommand` do `.wsb` parou de disparar — dois
 ciclos seguidos sem gravar nada, com o Sandbox de pé.
@@ -259,7 +277,15 @@ console. Está no README.
 
 ---
 
-## 8. Os ~10 s pela internet: decidido não resolver
+## 8. ~~Os ~10 s pela internet~~ — fechado em 2026-08-21
+
+**Fechado: a decisão já estava tomada e não sobrou trabalho.** Os ~10 s são o timeout do
+hole punching TCP, nenhuma opção do RustDesk os encurta, e a única rota que os elimina
+(encaminhar `21118/TCP`) está fora de cogitação nesta máquina — decisão de 2026-08-10, que
+não se reabre. Na rede local o problema já não existe (`direct-server` +
+`direct-access-port`). O que restava era observação oportunista, não tarefa: olhar o log do
+serviço na próxima conexão externa para ver se o IPv6 corrigido fez o punch sumir. Fica
+registrado abaixo como nota, não como pendência.
 
 Medido em 2026-08-10 (logs do serviço): o hole punching TCP falha em 0,3 s e o RustDesk só
 pede relay ~10 s depois. Esses 10 s são o timeout do punch — nenhuma opção do RustDesk os
@@ -290,9 +316,9 @@ tirariam o `rs-ny` (~188 ms daqui). Também não envolve o roteador.
 
 ---
 
-## 9. O pin de versão apodrece sozinho
+## 9. ~~O pin de versão apodrece sozinho~~ — fechado em 2026-08-21
 
-Fechado em 2026-08-11, mas com uma dívida embutida.
+O pin em si é de 2026-08-11; a dívida que ele deixou fechou em 2026-08-21.
 
 **O que foi feito e verificado nesta máquina** (verificação elevada, `0 falhas / 0 avisos`):
 
@@ -307,22 +333,43 @@ e a senha permanente sobreviveu à gravação — que era o risco real de mexer 
 (ele guarda hash, salt e as chaves do dispositivo). Estrutura conferida depois: nada movido,
 nada duplicado.
 
-**A dívida:** o pin é um número escrito à mão em `config/version.psd1`. Quando sair a
-1.4.10, nada no repositório avisa — a máquina continua na 1.4.9 para sempre, que é
-exatamente o que se pediu, até o dia em que uma correção de segurança importa. Não há
-processo para isso hoje.
+**A dívida era:** o pin é um número escrito à mão em `config/version.psd1`. Quando sair a
+1.4.10, nada no repositório avisava — a máquina continuaria na 1.4.9 para sempre, que é
+exatamente o que se pediu, até o dia em que uma correção de segurança importa.
 
-As saídas possíveis, em ordem de esforço:
+**Endereçada em 2026-08-21**, com a mais barata das três saídas que estavam na mesa: um
+passo no `ci.yml` (*Pin do RustDesk ainda e a ultima estavel?*) consulta
+`/repos/rustdesk/rustdesk/releases/latest` e emite `::warning` apontando para
+`config/version.psd1` quando o pin fica para trás, com a versão nova e o que trocar.
 
-- olhar as releases de vez em quando à mão (o que é o estado atual, e some da memória)
-- um passo no CI que consulta a última estável e **falha ou avisa** quando o pin fica para
-  trás — barato, mas transforma o CI em algo que quebra sem ninguém ter mexido no código
-- um agente agendado que abre PR trocando `Version` e `Sha256` — o hash teria de ser
-  calculado a partir do `.msi` baixado no runner, o que é fácil, mas passa a instalar o que
-  um bot escolheu
+Três decisões de projeto, porque cada uma podia ter ido para o outro lado:
 
-Nada disso está decidido. O comportamento seguro (ficar parado na versão fixada) é o padrão
-atual **de propósito**.
+- **avisa, não falha.** Um `exit 1` quebraria o PR de quem não encostou no pin, e ficar
+  parado na versão fixada continua sendo o comportamento seguro **de propósito**;
+- **erro de rede ou rate limit não tinge o job.** Sem release não há comparação, e um aviso
+  perdido custa menos que um falso alarme recorrente;
+- **nada de bot que abre PR com o bump.** O hash é fácil de calcular no runner, mas isso
+  passaria a instalar a versão que um agente escolheu. A troca de `Version` e `Sha256`
+  segue sendo à mão.
+
+**Os quatro caminhos foram executados** em 2026-08-21, extraindo o passo do YAML e rodando-o
+contra a API real:
+
+| Caminho | Como foi forçado | Saída |
+|---|---|---|
+| em dia | pin `1.4.9`, última estável `1.4.9` (`prerelease=False`) | `ok: pin 1.4.9 esta na ultima estavel` |
+| atrasado | cópia do `version.psd1` com `Version = '1.4.0'` | `::warning file=config/version.psd1::pin em 1.4.0, ultima estavel e 1.4.9` |
+| `latest` | cópia com `Version = 'latest'` | `ok: pin em latest, nada a comparar`, `exit 0` |
+| API indisponível | token vazio devolvendo `401` | `::warning::nao foi possivel consultar...`, `exit 0` |
+
+Foi o quarto teste que pagou o exercício: o header `Authorization` era montado sempre, e com
+`GITHUB_TOKEN` vazio a API devolve **401** em vez de atender anônimo. No Actions o token
+existe, então isso nunca apareceria lá — mas o passo ficaria mudo fora do CI. O header passou
+a ser condicional; o token só serve para escapar do rate limit, a release é pública.
+
+**O limite conhecido:** o aviso só existe quando o CI roda, ou seja em PR, push na `main` e
+`workflow_dispatch`. Repositório parado por meses = ninguém vê. Foi aceito: um cron abrindo
+issue resolveria isso, e continua sendo a saída se o aviso passar a chegar tarde demais.
 
 ---
 

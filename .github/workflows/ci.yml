@@ -46,6 +46,56 @@ jobs:
           ./tests/Power.Harness.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
+      - name: Pin do RustDesk ainda e a ultima estavel?
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # O pin em config/version.psd1 e um numero escrito a mao: quando sai
+          # uma release nova, nada no repositorio avisa. Este passo avisa - e
+          # so avisa. Falhar aqui quebraria PRs de quem nao mexeu no pin, e
+          # ficar parado na versao fixada e o comportamento seguro de proposito.
+          $pin = Import-PowerShellDataFile (Join-Path $PWD 'config/version.psd1')
+
+          if ($pin.Version -eq 'latest') {
+            Write-Host 'ok: pin em latest, nada a comparar'
+            exit 0
+          }
+
+          # O token e so para nao esbarrar no rate limit da API anonima; a
+          # release e publica. Header vazio vira 401, entao so mandamos se
+          # existir - assim o passo tambem roda fora do Actions.
+          $headers = @{
+            Accept                 = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          if ($env:GITHUB_TOKEN) { $headers.Authorization = "Bearer $env:GITHUB_TOKEN" }
+
+          try {
+            $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/rustdesk/rustdesk/releases/latest' -Headers $headers
+          } catch {
+            # Rede/rate limit nao sao motivo para tingir o job. Sem release
+            # nao ha comparacao, e um aviso perdido custa menos que um falso
+            # alarme recorrente.
+            Write-Host "::warning::nao foi possivel consultar a ultima release do RustDesk: $($_.Exception.Message)"
+            exit 0
+          }
+
+          # /releases/latest ja exclui draft e prerelease, entao 'nightly' nao
+          # aparece aqui - que e exatamente o filtro que o pin quer.
+          $ultima = ($rel.tag_name -replace '^v', '').Trim()
+
+          if (-not ($ultima -as [version]) -or -not ($pin.Version -as [version])) {
+            Write-Host "::warning::nao deu para comparar as versoes (pin='$($pin.Version)', ultima='$ultima')"
+            exit 0
+          }
+
+          if ([version]$ultima -gt [version]$pin.Version) {
+            Write-Host "::warning file=config/version.psd1::pin em $($pin.Version), ultima estavel e $ultima. Para subir: baixe rustdesk-$ultima-x86_64.msi, troque Version e Sha256."
+          } else {
+            Write-Host "ok: pin $($pin.Version) esta na ultima estavel ($ultima)"
+          }
+
       - name: Nenhum .toml/.bak/.log versionado
         shell: pwsh
         run: |

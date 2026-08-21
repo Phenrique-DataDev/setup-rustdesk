@@ -15,6 +15,10 @@
     O instalador recusa o arquivo se o hash nao bater, entao um pin com hash
     errado falha alto em vez de instalar algo inesperado.
 
+    Voce nao precisa vigiar as releases: o CI (.github/workflows/ci.yml) compara
+    este Version com a ultima estavel e avisa quando ele fica para tras. E aviso,
+    nao falha - ficar parado na versao fixada e o comportamento seguro.
+
     Copie para version-custom.psd1 para fixar outra versao sem tocar no repo:
     ele tem precedencia e esta no .gitignore.
 #>
