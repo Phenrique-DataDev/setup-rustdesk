@@ -195,6 +195,14 @@ if (-not $mexerNic) {
         # Estado anterior no log: e o que permite desfazer na mao depois.
         $log += "$($nic.Name): antes -> DeviceSleepOnDisconnect=$($pm.DeviceSleepOnDisconnect), WakeOnMagicPacket=$($pm.WakeOnMagicPacket)"
 
+        # Sem esta guarda o script reescreve o adaptador a cada execucao e
+        # reporta [APLICADO] sem ter mudado nada - escrita em hardware de graca
+        # toda vez que o -All roda, e uma saida que mente.
+        if ($pm.AllowComputerToTurnOffDevice -eq 'Disabled') {
+            $log += "[OK] $($nic.Name): o Windows ja nao desliga este adaptador"
+            continue
+        }
+
         if (-not $PSCmdlet.ShouldProcess($nic.Name, 'desligar o power saving do adaptador')) {
             $log += "[SIMULACAO] $($nic.Name): desligaria o power saving do adaptador"
             continue

@@ -20,26 +20,38 @@ Ordenado por **risco de morder**, não por esforço.
 Escrito em 2026-08-20. É o item de maior risco do repositório hoje, porque é código novo que
 mexe em configuração de sistema e cujo caminho de execução ninguém percorreu.
 
-O que **foi** verificado, na máquina de referência (desktop, Windows 11 Pro 26200):
+O que **foi** verificado, na máquina de referência (desktop, Windows 11 Pro 26200 pt-BR):
 
-- 43 testes estáticos passando, incluindo regressão de `-WhatIf` para `Set-PowerConfig.ps1`,
-  do carimbo de época do watchdog e do release do bloqueio no daemon;
+- 44 testes estáticos e **30 testes de harness** passando. O harness
+  (`tests/Power.Harness.ps1`) roda os scripts de verdade contra um `powercfg` e cmdlets de
+  rede substituídos por stubs, numa cópia temporária do repositório — nada toca o sistema;
+- **o daemon foi executado de ponta a ponta**, com a máquina de estados inteira encenada:
+  sem sessão → com sessão → bateria abaixo do limiar → recuperação → fim de sessão;
 - parser e checagem de ASCII em todos os arquivos novos;
-- `Test-IsLaptop` devolvendo `$false` corretamente, o que faz o passo inteiro ser pulado;
+- `Test-IsLaptop` devolvendo `$false`, o que faz o passo inteiro ser pulado em desktop;
 - `Test-RemoteSessionActive` devolvendo `$true` com uma sessão RustDesk de fato aberta;
-- `New-RustDeskResumeTrigger` produzindo um `MSFT_TaskEventTrigger` com `Delay = PT20S`.
+- `New-ScheduledTask` aceitando o array misto (boot + repetição + evento CIM) sem gravar
+  no Agendador;
+- o parser de índices do `powercfg` lendo corretamente a saída **traduzida** desta máquina.
 
-O que **não** foi, e só um notebook fecha:
+O harness pagou por si: encontrou **dois defeitos que nenhum teste estático pegaria**.
+
+| Defeito | Como aparecia |
+|---|---|
+| `[uint32]0x80000000` estoura em tempo de execução | O daemon **morria na partida, em qualquer máquina**. O parser aprovava. |
+| O adaptador de rede era reescrito a cada execução | `[APLICADO]` sem ter mudado nada, e escrita em hardware a cada `-All`. |
+
+Ainda assim, o essencial continua sem prova, e só um notebook fecha:
 
 | O quê | Por que importa |
 |---|---|
-| Qualquer chamada de `powercfg` que grava | O par `/setacvalueindex` + `/setactive` nunca rodou. Se a conferência por releitura estiver errada, o script anuncia sucesso sem ter mudado nada. |
-| O daemon segurando uma suspensão de verdade | `SetThreadExecutionState` foi escrito, não observado. Confirmar com `powercfg /requests` durante uma sessão só de Terminal. |
-| O limiar de bateria soltando o bloqueio | Exige bateria de verdade descendo abaixo de 15%. |
+| Qualquer chamada de `powercfg` que grava **de verdade** | No harness quem respondeu foi um stub. Se o `powercfg` real recusar um valor ou o `/setactive` não bastar, só a máquina real diz. |
+| O daemon segurando uma suspensão **real** | A chamada de API foi exercitada e o laço reage certo; que o Windows de fato *não suspenda* por causa dela, não. Confirmar com `powercfg /requests` durante uma sessão só de Terminal. |
+| O limiar de bateria com bateria de verdade | No harness a carga veio de um arquivo. |
 | Fechar a tampa e continuar alcançável | O teste que dá sentido ao resto. |
-| O trigger de resume disparando | `Get-ScheduledTaskInfo` do `RustDeskWatchdog` logo após acordar. |
-| O carimbo de época destravando | Suspender/acordar duas vezes e ver o watchdog tratar a segunda como época nova. |
-| `Disable-NetAdapterPowerManagement` | Mudança de hardware; só o `-WhatIf` foi coberto por teste. |
+| O trigger de resume **disparando** | O objeto é montado e aceito; que o Agendador o acione ao acordar, não foi visto. |
+| O carimbo de época destravando após suspensão real | A lógica de comparação foi testada; o resume real, não. |
+| `Disable-NetAdapterPowerManagement` no hardware | Só o stub e o `-WhatIf` foram cobertos. |
 
 **Próximo passo:** os itens 2 a 11 da seção *Verificação* do plano, num notebook real, com a
 saída guardada. Rodar `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar, para ter

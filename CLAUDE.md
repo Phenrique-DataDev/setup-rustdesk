@@ -74,10 +74,15 @@ mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
   conferidos antes de executar o instalador. Ao subir a versão, troque `Version` **e**
   `Sha256` — hash desatualizado faz o instalador abortar, que é o comportamento certo.
 - Testes: `.\tests\RustDeskToml.Tests.ps1` (usa arquivos temporários, não toca em
-  instalação real) e `.\tests\Test-Syntax.ps1` (parser em todos os `.ps1` +
-  checagem de ASCII). O CI (`.github/workflows/ci.yml`) roda os dois a cada PR e push
-  na `main`, mais um guarda contra `.toml`/`.bak`/`.log` versionados. Rode-os antes de
-  commitar: falhar no CI custa um ciclo a mais.
+  instalação real), `.\tests\Test-Syntax.ps1` (parser em todos os `.ps1` +
+  checagem de ASCII) e `.\tests\Power.Harness.ps1` (executa os scripts de energia
+  contra um `powercfg` falso, numa cópia em `%TEMP%`). O CI
+  (`.github/workflows/ci.yml`) roda os três a cada PR e push na `main`, mais um guarda
+  contra `.toml`/`.bak`/`.log` versionados. Rode-os antes de commitar: falhar no CI
+  custa um ciclo a mais.
+- **O harness é o que pega erro de execução.** Os outros dois são estáticos e aprovaram
+  um cast que matava o daemon na partida. Ao mexer no daemon, no `Set-PowerConfig.ps1`
+  ou nos triggers, rode `Power.Harness.ps1` — e prefira estendê-lo a confiar no parser.
 
 ## Armadilhas que já custaram tempo
 
@@ -105,6 +110,11 @@ afetam quem edita este repo:
   reprova quem voltar a casar por rótulo.
 - **`SetThreadExecutionState` é por thread.** O daemon tem que manter o laço na thread
   principal; um `Start-Job` perderia o bloqueio em silêncio.
+- **`[uint32]0x80000000` estoura.** O literal hex vira `Int32` negativo e o cast falha em
+  tempo de execução — o daemon morria na partida e nenhum teste estático via. Use
+  `[Convert]::ToUInt32('80000000', 16)`. Há teste de regressão; não o remova.
+- **`$array -notmatch 'x'` não testa "nenhum casa"** — devolve os que não casam, e lista
+  não-vazia é *truthy*. Conte os que casam. Já produziu falso positivo que escondeu um bug.
 - **A guarda do IPv6 no watchdog é "uma vez por época", não por boot.** Época = boot + último
   resume. Com Fast Startup ligado o `LastBootUpTime` nem avança ao desligar e ligar.
 

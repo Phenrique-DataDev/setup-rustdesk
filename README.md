@@ -109,6 +109,7 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
 | `.\tests\RustDeskToml.Tests.ps1` | Testes da biblioteca (em arquivos temporários) | não |
 | `.\tests\Test-Syntax.ps1` | Parser em todos os `.ps1` + checagem de ASCII | não |
+| `.\tests\Power.Harness.ps1` | Executa o passo de energia contra um `powercfg` falso | não |
 
 \* o passo de energia só entra quando a máquina **tem bateria**; em desktop é pulado.
 Use `-SkipPower` para desligá-lo num notebook.
@@ -410,11 +411,18 @@ serviço na mesma janela de tempo:
 
 ### O que não está coberto
 
-Nada disto foi executado num notebook real: a máquina de referência é um desktop, e o passo
-de energia sai limpo nela sem fazer nada. O código está escrito, os 43 testes estáticos passam
-e o `-WhatIf` de `Set-PowerConfig.ps1` é coberto por teste de regressão — mas **nenhuma linha
-de `powercfg` rodou de verdade**, e o daemon nunca segurou uma suspensão. Está registrado como
-trabalho conhecido no [BACKLOG](BACKLOG.md), não como promessa.
+Nada disto foi validado num notebook real: a máquina de referência é um desktop, e o passo de
+energia sai limpo nela sem fazer nada.
+
+O que existe é `tests/Power.Harness.ps1`, que executa os scripts de verdade contra um
+`powercfg` e cmdlets de rede substituídos por stubs, numa cópia temporária do repositório — o
+daemon inclusive roda, com a máquina de estados inteira encenada. Isso já pagou por si,
+achando dois defeitos que o parser aprovava: um cast que **matava o daemon na partida, em
+qualquer máquina**, e o adaptador de rede sendo reescrito a cada execução.
+
+Mas stub não é sistema. **Nenhuma linha de `powercfg` gravou de verdade**, o Windows nunca
+deixou de suspender por causa do daemon, e o Agendador nunca disparou o trigger de resume.
+Está registrado como trabalho conhecido no [BACKLOG](BACKLOG.md), não como promessa.
 
 Também não está coberto: se, em Modern Standby, a máquina realmente atende conexão nova
 enquanto está em espera. Ligar a conectividade em espera torna isso *possível*; não prova que
@@ -847,9 +855,10 @@ scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
 scripts/awake/                  template do daemon de energia
-tests/RustDeskToml.Tests.ps1    43 testes, sem tocar em instalação real
+tests/RustDeskToml.Tests.ps1    44 testes, sem tocar em instalação real
 tests/Test-Syntax.ps1           parser + ASCII em todos os scripts
-.github/workflows/ci.yml        roda os dois a cada PR e push na main
+tests/Power.Harness.ps1         30 testes de execução, com powercfg stubado
+.github/workflows/ci.yml        roda os três a cada PR e push na main
 ```
 
 ---
@@ -885,6 +894,17 @@ não Wayland.
 
 Coisas que custaram tempo para descobrir e estão codificadas aqui:
 
+- **`[uint32]0x80000000` estoura em PowerShell.** O literal hexadecimal é lido como `Int32`
+  (-2147483648) e o cast falha com *Value was either too large or too small for a UInt32*.
+  Essa é a constante `ES_CONTINUOUS` do `SetThreadExecutionState` — com ela, o daemon morria
+  na partida, em qualquer máquina. O parser não acusa; só executar acusa. Monte a flag com
+  `[Convert]::ToUInt32('80000000', 16)`. **Encontrado em 2026-08-20**, rodando o daemon num
+  harness com o resto stubado; há teste de regressão.
+- **`$array -notmatch 'x'` não significa "nenhum elemento casa".** Em array, `-notmatch`
+  devolve os elementos que *não* casam, e uma lista não-vazia é *truthy* — o assert passa
+  sempre. Para "nenhum", conte os que casam. Dois testes deste repositório deram falso
+  positivo por isso, e um deles escondia um bug real: o adaptador de rede sendo reescrito a
+  cada execução.
 - **`powercfg /setacvalueindex` não tem efeito sem `powercfg /setactive` depois.** O valor
   entra no esquema e o sistema segue usando o antigo. O script imprime sucesso, a leitura
   de conferência confirma, e a máquina continua suspendendo — a mesma família de falha do

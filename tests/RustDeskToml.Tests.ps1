@@ -536,6 +536,22 @@ It 'o daemon solta o bloqueio ao sair' {
         'o bloqueio nao usa ES_CONTINUOUS | ES_SYSTEM_REQUIRED'
 }
 
+It 'o daemon nao converte flag hexadecimal com cast direto' {
+    # [uint32]0x80000000 NAO funciona: o PowerShell le o literal hexadecimal como
+    # Int32 (-2147483648) e o cast estoura com "Value was either too large or too
+    # small for a UInt32". O daemon morria na partida por causa disso, em qualquer
+    # maquina, e nenhum teste estatico acusava - so executando. Este teste existe
+    # para a regressao nao voltar em silencio.
+    $arq = Join-Path $repoRaiz 'scripts\awake\rustdesk-awake.ps1'
+    # so linhas de codigo: o comentario que documenta a armadilha cita o padrao
+    # proibido de proposito, e nao deve reprovar o teste
+    $codigo = (Get-Content -LiteralPath $arq) | Where-Object { $_ -notmatch '^\s*#' }
+    Assert-True (($codigo -join "`n") -notmatch '\[uint32\]\s*0x') `
+        'cast direto de literal hexadecimal para uint32 - estoura em tempo de execucao'
+    Assert-True ((Get-Content -LiteralPath $arq -Raw) -match "\[Convert\]::ToUInt32\('80000000', 16\)") `
+        'ES_CONTINUOUS nao e montado por Convert::ToUInt32'
+}
+
 It 'config/power.psd1 tem as chaves que os scripts leem' {
     $power = Import-RustDeskConfigFile -Path (Join-Path $repoRaiz 'config\power.psd1')
     foreach ($k in @('LidActionAC', 'LidActionDC', 'StandbyIdleAC', 'StandbyIdleDC',

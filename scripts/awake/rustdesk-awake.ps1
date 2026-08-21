@@ -59,8 +59,12 @@ public static extern uint SetThreadExecutionState(uint esFlags);
 '@
 }
 
-$ES_CONTINUOUS      = [uint32]0x80000000
-$ES_SYSTEM_REQUIRED = [uint32]0x00000001
+# ATENCAO: [uint32]0x80000000 NAO funciona. O PowerShell le o literal
+# hexadecimal como Int32, que da -2147483648, e o cast para uint32 estoura com
+# "Value was either too large or too small for a UInt32". O daemon morria na
+# partida por causa disso, sem nenhum teste estatico acusar - so executando.
+$ES_CONTINUOUS      = [Convert]::ToUInt32('80000000', 16)
+$ES_SYSTEM_REQUIRED = [Convert]::ToUInt32('00000001', 16)
 
 function Set-Bloqueio {
     param([bool]$Ativo)
@@ -97,7 +101,8 @@ function Get-Carga {
 # Um daemon morto deixando a maquina insone para sempre e pior do que nao ter
 # daemon nenhum. Duas redes: o finally do laco e o evento de saida do host.
 $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    try { [RustDeskAwake.Native]::SetThreadExecutionState([uint32]0x80000000) | Out-Null } catch { }
+    # mesma armadilha do cast: converter da string hex, nao do literal
+    try { [RustDeskAwake.Native]::SetThreadExecutionState([Convert]::ToUInt32('80000000', 16)) | Out-Null } catch { }
 }
 
 Write-Log "Daemon iniciado. Intervalo ${poll}s, limiar de bateria ${minBat}%."

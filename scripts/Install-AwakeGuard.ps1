@@ -105,7 +105,11 @@ $errs = $null; $toks = $null
 if ($errs) { throw "o daemon gerado tem erro de sintaxe: $($errs[0].Message)" }
 
 if (-not $PSCmdlet.ShouldProcess($paths.AwakeScript, 'gravar o daemon')) {
-    Write-Host "  [SIMULACAO] gravaria $($paths.AwakeScript) e registraria a tarefa $($paths.AwakeTask)"
+    # o $log acumulado tambem sai aqui: em simulacao ele carrega justamente o
+    # diagnostico (de onde vieram as opcoes, avisos de valor incoerente), e
+    # descarta-lo tornava o -WhatIf menos informativo que a execucao real
+    $log += "[SIMULACAO] gravaria $($paths.AwakeScript) e registraria a tarefa $($paths.AwakeTask)"
+    $log | ForEach-Object { Write-Host "  $_" }
     return
 }
 
