@@ -371,6 +371,27 @@ It 'o daemon com os stubs passa no parser' {
     Assert-True (-not $errs) "erro de sintaxe: $(if ($errs) { $errs[0].Message })"
 }
 
+function Wait-Log {
+    <#
+        Espera ate o log ter N ocorrencias do padrao, ou estoura o tempo.
+
+        NAO usar Start-Sleep fixo aqui: o arranque do daemon inclui o Add-Type,
+        que compila C# na primeira vez. Numa maquina rapida isso cabe em 3
+        segundos; num runner de CI, nao - e o teste falhava por relogio, nao por
+        defeito.
+    #>
+    param([string]$Padrao, [int]$Vezes = 1, [int]$TimeoutSeconds = 60)
+    $limite = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $limite) {
+        $l = @(Get-Content -LiteralPath $logDaemon -ErrorAction SilentlyContinue |
+               Where-Object { $_ -match $Padrao })
+        if ($l.Count -ge $Vezes) { return $l }
+        Start-Sleep -Milliseconds 400
+    }
+    return @(Get-Content -LiteralPath $logDaemon -ErrorAction SilentlyContinue |
+             Where-Object { $_ -match $Padrao })
+}
+
 Set-Content -LiteralPath $fEstado -Value '0'
 Set-Content -LiteralPath $fBateria -Value '80'
 $exe  = (Get-Process -Id $PID).Path
@@ -378,36 +399,35 @@ $proc = Start-Process -FilePath $exe `
     -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $daemon) `
     -PassThru -WindowStyle Hidden
 try {
-    Start-Sleep -Seconds 3
     It 'sobe e nao segura nada sem sessao' {
-        $l = Get-Content -LiteralPath $logDaemon -ErrorAction SilentlyContinue
-        Assert-True ($l -match 'Daemon iniciado') 'nao registrou a partida - provavelmente morreu no arranque'
-        Assert-True ($l -match 'Sem sessao remota') 'nao registrou o bloqueio solto'
+        Assert-True (@(Wait-Log 'Daemon iniciado').Count -ge 1) `
+            'nao registrou a partida - provavelmente morreu no arranque'
+        Assert-True (@(Wait-Log 'Sem sessao remota').Count -ge 1) 'nao registrou o bloqueio solto'
     }
 
-    Set-Content -LiteralPath $fEstado -Value '1'; Start-Sleep -Seconds 3
+    Set-Content -LiteralPath $fEstado -Value '1'
     It 'ao aparecer sessao remota, segura a maquina acordada' {
-        $l = Get-Content -LiteralPath $logDaemon
-        Assert-True ($l -match 'Segurando a maquina acordada') 'nao passou a segurar'
+        $l = Wait-Log 'Segurando a maquina acordada'
+        Assert-True ($l.Count -ge 1) 'nao passou a segurar'
         Assert-True ($l -match 'bateria 80%') 'nao registrou a carga na transicao'
     }
 
-    Set-Content -LiteralPath $fBateria -Value '9'; Start-Sleep -Seconds 3
+    Set-Content -LiteralPath $fBateria -Value '9'
     It 'com a bateria abaixo do limiar, solta mesmo com sessao ativa' {
-        $l = Get-Content -LiteralPath $logDaemon
-        Assert-True ($l -match 'bateria caiu para 9%') 'nao soltou por bateria baixa'
+        $l = Wait-Log 'bateria caiu para 9%'
+        Assert-True ($l.Count -ge 1) 'nao soltou por bateria baixa'
         Assert-True ($l -match 'melhor suspender do que desligar') 'nao explicou o porque'
     }
 
-    Set-Content -LiteralPath $fBateria -Value '80'; Start-Sleep -Seconds 3
+    Set-Content -LiteralPath $fBateria -Value '80'
     It 'recuperando a carga, volta a segurar' {
-        $l = @(Get-Content -LiteralPath $logDaemon | Where-Object { $_ -match 'Segurando a maquina acordada' })
+        $l = Wait-Log 'Segurando a maquina acordada' -Vezes 2
         Assert-True ($l.Count -ge 2) "esperava voltar a segurar; ocorrencias: $($l.Count)"
     }
 
-    Set-Content -LiteralPath $fEstado -Value '0'; Start-Sleep -Seconds 3
+    Set-Content -LiteralPath $fEstado -Value '0'
     It 'ao encerrar a sessao, solta o bloqueio' {
-        $l = @(Get-Content -LiteralPath $logDaemon | Where-Object { $_ -match 'Bloqueio solto' })
+        $l = Wait-Log 'Bloqueio solto' -Vezes 2
         Assert-True ($l.Count -ge 2) "esperava soltar de novo; ocorrencias: $($l.Count)"
     }
 
