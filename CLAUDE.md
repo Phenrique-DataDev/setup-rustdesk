@@ -72,14 +72,16 @@ mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
   RustDesk antes de mover uma chave de um para o outro.
 - **A versão do RustDesk é fixada** em `config/version.psd1`, com SHA-256 e assinatura
   conferidos antes de executar o instalador. Ao subir a versão, troque `Version` **e**
-  `Sha256` — hash desatualizado faz o instalador abortar, que é o comportamento certo.
+  `Sha256` — hash desatualizado faz o instalador abortar, que é o comportamento certo. O CI
+  avisa (`::warning`, sem falhar) quando o pin fica atrás da última estável; falha de rede
+  ou rate limit na API do GitHub também só avisam. Não transforme esse passo em `exit 1`.
 - Testes: `.\tests\RustDeskToml.Tests.ps1` (usa arquivos temporários, não toca em
   instalação real), `.\tests\Test-Syntax.ps1` (parser em todos os `.ps1` +
   checagem de ASCII) e `.\tests\Power.Harness.ps1` (executa os scripts de energia
   contra um `powercfg` falso, numa cópia em `%TEMP%`). O CI
   (`.github/workflows/ci.yml`) roda os três a cada PR e push na `main`, mais um guarda
-  contra `.toml`/`.bak`/`.log` versionados. Rode-os antes de commitar: falhar no CI
-  custa um ciclo a mais.
+  contra `.toml`/`.bak`/`.log` versionados e o aviso de pin desatualizado. Rode-os antes
+  de commitar: falhar no CI custa um ciclo a mais.
 - **O harness é o que pega erro de execução.** Os outros dois são estáticos e aprovaram
   um cast que matava o daemon na partida. Ao mexer no daemon, no `Set-PowerConfig.ps1`
   ou nos triggers, rode `Power.Harness.ps1` — e prefira estendê-lo a confiar no parser.

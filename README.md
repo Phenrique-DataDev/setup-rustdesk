@@ -225,7 +225,13 @@ Se qualquer uma falhar, o arquivo é apagado sem ser executado e o script para c
 pin com hash errado falha alto, em vez de instalar algo inesperado em silêncio.
 
 Para subir de versão: escolha uma release **não** marcada como *prerelease*, troque
-`Version` e `Sha256`, e rode `.\Setup.ps1 -Install`. Para escapar do pin pontualmente:
+`Version` e `Sha256`, e rode `.\Setup.ps1 -Install`. Você não precisa lembrar de olhar: o CI
+consulta a última estável a cada execução e emite um **aviso** apontando para
+`config/version.psd1` quando o pin fica para trás. Ele avisa e segue verde — ficar parado na
+versão fixada é o comportamento seguro, e um `exit 1` quebraria PRs de quem não encostou no
+pin. O limite é que o aviso só aparece quando o CI roda; repositório parado, ninguém vê.
+
+Para escapar do pin pontualmente:
 
 ```powershell
 .\Setup.ps1 -Install -Version 1.4.8      # outra versão fixa
@@ -858,7 +864,8 @@ scripts/awake/                  template do daemon de energia
 tests/RustDeskToml.Tests.ps1    44 testes, sem tocar em instalação real
 tests/Test-Syntax.ps1           parser + ASCII em todos os scripts
 tests/Power.Harness.ps1         30 testes de execução, com powercfg stubado
-.github/workflows/ci.yml        roda os três a cada PR e push na main
+.github/workflows/ci.yml        roda os três a cada PR e push na main, mais o
+                                aviso de pin desatualizado
 ```
 
 ---
