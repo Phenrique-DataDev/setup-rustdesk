@@ -161,8 +161,12 @@ function Get-RustDeskPaths {
         WatchdogDir       = Join-Path $env:ProgramData 'RustDesk'
         WatchdogScript    = Join-Path $env:ProgramData 'RustDesk\rustdesk-watchdog.ps1'
         WatchdogLog       = Join-Path $env:ProgramData 'RustDesk\watchdog.log'
+        AwakeScript       = Join-Path $env:ProgramData 'RustDesk\rustdesk-awake.ps1'
+        AwakeLog          = Join-Path $env:ProgramData 'RustDesk\awake.log'
+        DiagnosticsDir    = Join-Path $env:ProgramData 'RustDesk'
         ServiceName       = 'rustdesk'
         TaskName          = 'RustDeskWatchdog'
+        AwakeTask         = 'RustDeskAwake'
     }
 }
 
@@ -216,6 +220,173 @@ function Test-HerdrServer {
     } catch {
         return $false
     }
+}
+
+function Test-IsLaptop {
+    <#
+    .SYNOPSIS
+        Retorna $true se a maquina e portatil (tem bateria propria).
+    .DESCRIPTION
+        E esta funcao que decide se o passo de energia entra no -All. Em desktop
+        ela devolve $false e nada relacionado a bateria roda nem aparece na
+        verificacao.
+    .NOTES
+        Duas fontes, de proposito:
+        - PCSystemType 2 (Mobile) e a resposta autoritativa quando o firmware a
+          preenche direito, e decide sozinha.
+        - Win32_Battery e o fallback, porque ha portateis que reportam
+          PCSystemType errado. Sozinha ela nao serviria: desktop com nobreak
+          USB tambem expoe Win32_Battery.
+        Nenhuma das duas exige elevacao.
+    #>
+    [CmdletBinding()] param()
+
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        if ($cs.PCSystemType -eq 2) { return $true }
+    } catch {
+        # sem WMI nao da para decidir pelo tipo; segue para o fallback
+    }
+
+    try {
+        $bat = @(Get-CimInstance Win32_Battery -ErrorAction Stop)
+        return ($bat.Count -gt 0)
+    } catch {
+        return $false
+    }
+}
+
+function Get-BatteryPercent {
+    <#
+    .SYNOPSIS
+        Carga da bateria em porcentagem, ou 100 quando nao ha bateria em uso.
+    .NOTES
+        Devolve 100 (e nao $null) para desktop e para maquina na tomada sem
+        bateria: quem chama usa este valor como limiar, e um $null viraria
+        comparacao com zero - soltando o bloqueio de suspensao justamente onde
+        nao ha risco nenhum de acabar a carga.
+    #>
+    [CmdletBinding()] param()
+
+    try {
+        $bat = @(Get-CimInstance Win32_Battery -ErrorAction Stop |
+                 Where-Object { $null -ne $_.EstimatedChargeRemaining })
+        if ($bat.Count -eq 0) { return 100 }
+        return [int]($bat | Measure-Object -Property EstimatedChargeRemaining -Minimum).Minimum
+    } catch {
+        return 100
+    }
+}
+
+function Test-RemoteSessionActive {
+    <#
+    .SYNOPSIS
+        Retorna $true se ha sessao remota do RustDesk em curso.
+    .DESCRIPTION
+        O connection manager (--cm) so existe enquanto alguem esta conectado.
+        E o mesmo sinal que o watchdog usa para adiar um reinicio do servico e
+        que o daemon RustDeskAwake usa para segurar a suspensao.
+    .NOTES
+        Devolve [bool] de proposito, nunca a linha de comando: CommandLine e o
+        campo que carrega --password e --set-unlock-pin, e que a verificacao
+        redige antes de imprimir. Nada aqui deve vazar para log.
+    #>
+    [CmdletBinding()] param()
+
+    try {
+        $procs = @(Get-CimInstance Win32_Process -Filter "Name='rustdesk.exe'" -ErrorAction Stop |
+                   Where-Object { $_.CommandLine -match '--cm' })
+        return ($procs.Count -gt 0)
+    } catch {
+        return $false
+    }
+}
+
+function Get-LastResumeTime {
+    <#
+    .SYNOPSIS
+        Data do ultimo retorno de suspensao, ou $null se nunca suspendeu.
+    .DESCRIPTION
+        Usada como parte do carimbo de "uma tentativa por epoca" do watchdog.
+        Sem ela, o carimbo seria so LastBootUpTime - e num notebook, que
+        suspende varias vezes por dia sem reiniciar, uma recusa gravada de
+        manha valeria ate o proximo boot.
+    .NOTES
+        Kernel-Power 107 e o evento de resume; Power-Troubleshooter 1 e o
+        fallback, que existe mesmo quando o 107 nao foi registrado. Sem
+        elevacao os dois canais sao legiveis.
+    #>
+    [CmdletBinding()] param()
+
+    foreach ($f in @(
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power';         Id = 107 },
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Power-Troubleshooter'; Id = 1 }
+    )) {
+        try {
+            $ev = Get-WinEvent -FilterHashtable $f -MaxEvents 1 -ErrorAction Stop
+            if ($ev) { return $ev.TimeCreated }
+        } catch {
+            # 'No events were found' e o caso normal em maquina que nunca
+            # suspendeu - tenta a proxima fonte em vez de falhar
+        }
+    }
+    return $null
+}
+
+function Get-PowerEpochStamp {
+    <#
+    .SYNOPSIS
+        Carimbo de epoca: ultimo boot e ultimo resume, numa string so.
+    .DESCRIPTION
+        O watchdog grava este valor para nao repetir a mesma correcao
+        indefinidamente. Incluir o resume faz a epoca avancar ao acordar, que e
+        o que destrava o caso do notebook sem afrouxar a protecao original.
+    .NOTES
+        Com Fast Startup ligado, desligar e ligar NAO avanca LastBootUpTime - o
+        que seria um desligamento vira hibernacao. Por isso o resume nao e
+        opcional aqui.
+    #>
+    [CmdletBinding()] param()
+
+    $boot = try { (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToString('o') }
+            catch { '-' }
+    $resume = Get-LastResumeTime
+    $r = if ($resume) { $resume.ToString('o') } else { '-' }
+    return "$boot|$r"
+}
+
+function New-RustDeskResumeTrigger {
+    <#
+    .SYNOPSIS
+        Trigger de tarefa agendada que dispara quando a maquina acorda.
+    .DESCRIPTION
+        A repeticao de N minutos do watchdog nao sabe o que e acordar: depois de
+        uma suspensao a maquina pode ficar ate um intervalo inteiro com o
+        servico em estado ruim. Este trigger fecha essa janela.
+    .NOTES
+        New-ScheduledTaskTrigger nao expoe triggers de evento - por isso a
+        instancia CIM crua. Power-Troubleshooter 1 e o evento de resume
+        completo, e o que carrega o motivo do wake.
+
+        O Delay nao e cosmetico: sem ele a checagem roda antes de o Wi-Fi
+        reassociar e conclui que a rede esta fora do ar.
+    .OUTPUTS
+        Instancia CIM de MSFT_TaskEventTrigger, pronta para Register-ScheduledTask.
+    #>
+    [CmdletBinding()]
+    param([int]$DelaySeconds = 20)
+
+    $xml = @"
+<QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]</Select></Query></QueryList>
+"@
+
+    $classe = Get-CimClass -ClassName MSFT_TaskEventTrigger `
+                           -Namespace Root/Microsoft/Windows/TaskScheduler -ErrorAction Stop
+    $t = New-CimInstance -CimClass $classe -ClientOnly
+    $t.Enabled      = $true
+    $t.Subscription = $xml
+    $t.Delay        = "PT${DelaySeconds}S"
+    return $t
 }
 
 function Stop-RustDeskClean {
@@ -328,4 +499,6 @@ function Start-RustDeskUI {
 Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Get-HerdrPaths,
                               Test-HerdrServer, Import-RustDeskConfigFile,
                               Get-RustDeskPin, Get-RustDeskVersion, Resolve-RustDeskLatestVersion,
-                              Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI
+                              Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI,
+                              Test-IsLaptop, Get-BatteryPercent, Test-RemoteSessionActive,
+                              Get-LastResumeTime, Get-PowerEpochStamp, New-RustDeskResumeTrigger

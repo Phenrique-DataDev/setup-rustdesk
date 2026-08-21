@@ -7,7 +7,66 @@ Revisado em **2026-08-11**: o repositório virou público com CI obrigatório, a
 RustDesk passou a ser fixada e as atualizações automáticas foram desligadas e verificadas na
 máquina. O item 5 fechou — por um motivo que ninguém esperava.
 
+Revisado em **2026-08-20**: entrou o suporte a notebook (energia, tampa fechada, daemon de
+suspensão e trigger de resume no watchdog). Ele nasce inteiro no item 1 — a máquina de
+referência é um desktop, então **nenhuma linha do passo de energia foi executada**.
+
 Ordenado por **risco de morder**, não por esforço.
+
+---
+
+## 0. O suporte a notebook nunca rodou num notebook
+
+Escrito em 2026-08-20. É o item de maior risco do repositório hoje, porque é código novo que
+mexe em configuração de sistema e cujo caminho de execução ninguém percorreu.
+
+O que **foi** verificado, na máquina de referência (desktop, Windows 11 Pro 26200 pt-BR):
+
+- 44 testes estáticos e **30 testes de harness** passando. O harness
+  (`tests/Power.Harness.ps1`) roda os scripts de verdade contra um `powercfg` e cmdlets de
+  rede substituídos por stubs, numa cópia temporária do repositório — nada toca o sistema;
+- **o daemon foi executado de ponta a ponta**, com a máquina de estados inteira encenada:
+  sem sessão → com sessão → bateria abaixo do limiar → recuperação → fim de sessão;
+- parser e checagem de ASCII em todos os arquivos novos;
+- `Test-IsLaptop` devolvendo `$false`, o que faz o passo inteiro ser pulado em desktop;
+- `Test-RemoteSessionActive` devolvendo `$true` com uma sessão RustDesk de fato aberta;
+- `New-ScheduledTask` aceitando o array misto (boot + repetição + evento CIM) sem gravar
+  no Agendador;
+- o parser de índices do `powercfg` lendo corretamente a saída **traduzida** desta máquina.
+
+O harness pagou por si: encontrou **dois defeitos que nenhum teste estático pegaria**.
+
+| Defeito | Como aparecia |
+|---|---|
+| `[uint32]0x80000000` estoura em tempo de execução | O daemon **morria na partida, em qualquer máquina**. O parser aprovava. |
+| O adaptador de rede era reescrito a cada execução | `[APLICADO]` sem ter mudado nada, e escrita em hardware a cada `-All`. |
+
+Ainda assim, o essencial continua sem prova, e só um notebook fecha:
+
+| O quê | Por que importa |
+|---|---|
+| Qualquer chamada de `powercfg` que grava **de verdade** | No harness quem respondeu foi um stub. Se o `powercfg` real recusar um valor ou o `/setactive` não bastar, só a máquina real diz. |
+| O daemon segurando uma suspensão **real** | A chamada de API foi exercitada e o laço reage certo; que o Windows de fato *não suspenda* por causa dela, não. Confirmar com `powercfg /requests` durante uma sessão só de Terminal. |
+| O limiar de bateria com bateria de verdade | No harness a carga veio de um arquivo. |
+| Fechar a tampa e continuar alcançável | O teste que dá sentido ao resto. |
+| O trigger de resume **disparando** | O objeto é montado e aceito; que o Agendador o acione ao acordar, não foi visto. |
+| O carimbo de época destravando após suspensão real | A lógica de comparação foi testada; o resume real, não. |
+| `Disable-NetAdapterPowerManagement` no hardware | Só o stub e o `-WhatIf` foram cobertos. |
+
+**Próximo passo:** os itens 2 a 11 da seção *Verificação* do plano, num notebook real, com a
+saída guardada. Rodar `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar, para ter
+linha de base.
+
+Duas perguntas em aberto que o diagnóstico deve responder, e que motivaram o coletor:
+
+1. O que exatamente não volta ao sair do ocioso. A hipótese principal é o power saving do
+   adaptador Wi-Fi, mas é hipótese — o coletor correlaciona os eventos de resume com o
+   `watchdog.log` e o log do serviço justamente para trocar hipótese por evidência.
+2. Se, em Modern Standby, a máquina realmente atende conexão nova enquanto está em espera.
+   Ligar a conectividade em espera torna isso possível; não prova que acontece.
+
+Também não medido: **quanto o setup custa de bateria em repouso**. O watchdog a cada 10 min e
+o daemon a cada 30 s são baratos no papel; ninguém mediu.
 
 ---
 

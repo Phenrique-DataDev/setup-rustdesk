@@ -37,6 +37,15 @@ jobs:
           ./tests/RustDeskToml.Tests.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
+      - name: Harness de energia (executa os scripts com powercfg stubado)
+        shell: pwsh
+        run: |
+          # Roda os scripts de verdade contra um mundo falso, numa copia em
+          # %TEMP%. Nada toca o runner. Pega o que o parser nao ve - foi assim
+          # que apareceu um cast que estourava na partida do daemon.
+          ./tests/Power.Harness.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       - name: Nenhum .toml/.bak/.log versionado
         shell: pwsh
         run: |

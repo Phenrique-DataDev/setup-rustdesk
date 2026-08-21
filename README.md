@@ -97,21 +97,31 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | Comando | O que faz | Admin |
 |---|---|---|
 | `.\Setup.ps1` | Só verifica. Não altera nada. | não |
-| `.\Setup.ps1 -All` | RustDesk + watchdog + Herdr + verifica | **sim** |
+| `.\Setup.ps1 -All` | RustDesk + watchdog + energia* + Herdr + verifica | **sim** |
 | `.\Setup.ps1 -Install` | Instala o RustDesk e registra o serviço | **sim** |
 | `.\Setup.ps1 -Configure` | Reaplica as opções nas duas configs do RustDesk | **sim** |
 | `.\Setup.ps1 -Watchdog` | Instala o watchdog e a tarefa agendada | **sim** |
+| `.\Setup.ps1 -Power` | Energia para notebook: tampa, suspensão, rede, daemon | **sim** |
 | `.\Setup.ps1 -Herdr` | Instala o Herdr, aplica a config e põe o servidor no logon | não |
 | `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
+| `.\scripts\Get-PowerDiagnostics.ps1` | Coleta o estado de energia num relatório. Não altera nada. | não\*\* |
+| `.\scripts\Install-AwakeGuard.ps1 -Uninstall` | Remove o daemon de energia | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
 | `.\tests\RustDeskToml.Tests.ps1` | Testes da biblioteca (em arquivos temporários) | não |
 | `.\tests\Test-Syntax.ps1` | Parser em todos os `.ps1` + checagem de ASCII | não |
+| `.\tests\Power.Harness.ps1` | Executa o passo de energia contra um `powercfg` falso | não |
+
+\* o passo de energia só entra quando a máquina **tem bateria**; em desktop é pulado.
+Use `-SkipPower` para desligá-lo num notebook.
+
+\*\* o coletor roda sem elevação, mas o log do serviço e as tarefas de SYSTEM ficam
+ilegíveis — ele avisa em vez de reportar ausência como se fosse fato.
 
 \* a verificação roda sem elevação, mas as checagens da config do serviço aparecem como
 `[AVISO] requer Administrador` — o diretório é protegido. A parte do Herdr mora no perfil
 do usuário e é verificada por completo sem elevação.
 
-Opções úteis: `-IntervalMinutes 5` (frequência do watchdog), `-ConfigFile caminho.psd1`
+Opções úteis: `-IntervalMinutes 5` (frequência do watchdog), `-SkipPower`, `-ConfigFile caminho.psd1`
 (RustDesk), `-HerdrConfigFile caminho.psd1`, `-SkipHerdrInstall` (só configura um Herdr já
 instalado).
 
@@ -263,7 +273,10 @@ serviço "rustdesk"                   Automatic + recovery: reiniciar 3× a cada
 C:\ProgramData\RustDesk\
   rustdesk-watchdog.ps1              watchdog materializado do template
   watchdog.log                       rotaciona em 1 MB, mantém 2000 linhas
-Tarefa "RustDeskWatchdog"            SYSTEM, no boot + a cada 10 min
+  rustdesk-awake.ps1                 daemon de energia (só em notebook)
+  awake.log                          transições do bloqueio de suspensão
+Tarefa "RustDeskWatchdog"            SYSTEM, no boot, a cada 10 min e ao acordar
+Tarefa "RustDeskAwake"               SYSTEM, só em notebook, sem limite de duração
 
 %LOCALAPPDATA%\Programs\Herdr\       binário (instalador oficial do herdr.dev)
 %APPDATA%\herdr\config.toml          config aplicada de config/herdr*.psd1
@@ -285,11 +298,135 @@ O reinício é deliberadamente conservador, porque derruba sessão ativa:
 
 - só age se a máquina **tem** IPv6 global naquele momento — numa rede sem IPv6 ele nunca
   dispara, em vez de reiniciar para sempre;
-- no máximo **uma vez por boot**, marcado em disco (um STUN fora do ar não vira reinício a
-  cada 10 min);
+- no máximo **uma vez por época**, marcado em disco (um STUN fora do ar não vira reinício a
+  cada 10 min). Época é o último boot **mais** o último retorno de suspensão — só o boot
+  viraria uma trava num notebook, que suspende várias vezes por dia sem reiniciar;
 - nunca com **sessão remota em curso** (processo `--cm` no ar) — adia para a próxima passada.
 
 Tudo o que ele decide vai para `watchdog.log`, inclusive as recusas.
+
+---
+
+## Notebooks: bateria, tampa fechada e volta do ocioso
+
+Este repositório nasceu numa máquina de referência **desktop**, e isso estava escrito no
+próprio código: o comentário que justifica `-DontStopIfGoingOnBatteries` no watchdog dizia
+*"em desktop com nobreak"*. Num portátil, os defaults do Windows quebram a premissa central
+daqui — *a máquina está sempre alcançável e o trabalho sobrevive* — de três maneiras que não
+são óbvias:
+
+1. **Fechar a tampa suspende a máquina.** O acesso remoto morre e nada avisa.
+2. **Uma sessão só de Terminal não conta como atividade.** O timer de ociosidade do Windows
+   olha teclado e mouse. Um agente rodando via Herdr pelo Terminal do RustDesk não produz
+   nenhum dos dois — a máquina dorme no meio do trabalho, que é exatamente o cenário que
+   este repositório existe para proteger.
+3. **O watchdog não sabia o que era acordar.** Os gatilhos eram só o boot e a repetição de
+   N minutos.
+
+O passo `-Power` trata os três. Ele entra sozinho no `-All` **quando a máquina tem
+bateria**; em desktop não roda, e a seção de energia nem aparece na verificação.
+
+```powershell
+.\Setup.ps1 -Power          # só a parte de energia. Exige Administrador.
+.\Setup.ps1 -All -SkipPower # notebook, mas sem mexer em energia
+```
+
+### O que muda
+
+Os valores ficam em `config/power.psd1` (copie para `power-custom.psd1` para alterar).
+
+| Opção | Padrão | Por quê |
+|---|---|---|
+| Ação ao fechar a tampa | **nada**, na tomada e na bateria | É a decisão central: tampa fechada é máquina acessível com o painel apagado. |
+| Suspender por ociosidade (tomada) | nunca | Na tomada não há o que economizar. |
+| Suspender por ociosidade (bateria) | 30 min | Continua existindo **de propósito** — ver abaixo. |
+| Hibernar por ociosidade | nunca | Hibernar derruba o serviço e a sessão do Herdr; é o pior caso. |
+| Desligar o painel | 10 min / 3 min | Economia gratuita: a captura de tela do RustDesk continua funcionando com o monitor apagado, e em notebook o painel é o maior consumidor isolado. |
+| Conectividade de rede em espera | ligada | Só existe em máquina com Modern Standby (S0ix); onde não existe, o passo é pulado sem erro. |
+| Power saving do adaptador de rede | desligado | *Permitir que o computador desligue este dispositivo* é o suspeito número um de "acordou, mas o RustDesk só reconectou minutos depois". |
+
+### A suspensão na bateria não é desligada — ela é bloqueada só quando importa
+
+Simplesmente nunca dormir custaria bateria em todas as horas em que ninguém está conectado,
+em troca de nada. Quem resolve é um daemon dedicado, a tarefa **`RustDeskAwake`**: a cada 30
+segundos ele pergunta se há sessão remota em curso (o processo `--cm`, o mesmo sinal que o
+watchdog já usava) e, se houver, chama `SetThreadExecutionState` com `ES_SYSTEM_REQUIRED`.
+Ao desconectar, solta.
+
+Três detalhes que decidem se isso funciona:
+
+- **`ES_DISPLAY_REQUIRED` fica de fora.** Segura o sistema acordado e deixa o painel apagar.
+- **O estado é por *thread*, não por processo.** A chamada tem que sair da mesma thread que
+  continua viva; um `Start-Job` perderia o bloqueio sem erro nenhum.
+- **Abaixo de 15% de bateria o bloqueio é solto**, mesmo com sessão ativa. Desligar por carga
+  zero no meio de um agente é pior do que suspender.
+
+Sair sempre solta: há um `finally` e um handler de `PowerShell.Exiting`. Um daemon morto
+deixando a máquina insone para sempre seria pior do que não ter daemon.
+
+### Acordar virou um evento
+
+O watchdog ganhou um segundo gatilho, por evento: `Microsoft-Windows-Power-Troubleshooter`
+ID 1, com 20 segundos de atraso para o Wi-Fi reassociar antes da checagem. Sem ele, a máquina
+podia passar um intervalo inteiro depois de acordar com o serviço em estado ruim.
+
+Junto veio uma correção que **não é opcional**. A guarda do reparo de IPv6 era "no máximo uma
+vez por boot", carimbada com `LastBootUpTime`. Num portátil, que suspende várias vezes por dia
+sem reiniciar, uma recusa gravada de manhã valeria até o próximo boot — a proteção virava
+trava. O carimbo passou a ser **boot + último resume**:
+
+```
+2026-08-20 09:14:02 | Ultimo retorno de suspensao: 2026-08-20 09:13:38 (ha 0 min).
+2026-08-20 09:14:03 | Servico subiu sem IPv6 (corrida no boot) e a maquina tem IPv6 global. Reiniciando.
+2026-08-20 09:14:16 | IPv6 recuperado apos o reinicio.
+```
+
+Com **Fast Startup** ligado o problema é ainda maior: desligar e ligar não é um boot — a
+sessão do kernel é hibernada e restaurada, e o `LastBootUpTime` não avança. Este repositório
+**não altera** o Fast Startup; a verificação apenas avisa quando ele está ligado.
+
+### O que sobrevive a quê, agora
+
+| Acontece | Máquina | Sessão remota | Trabalho no Herdr |
+|---|---|---|---|
+| `Win+L` (bloqueia a tela) | acordada | **continua** | continua |
+| Fecha a tampa | **acordada** (painel apaga) | continua | continua |
+| Ocioso na tomada | acordada | continua | continua |
+| Ocioso na bateria, **com** sessão | **acordada** (daemon segura) | continua | continua |
+| Ocioso na bateria, **sem** sessão | suspende em 30 min | — | preservado, retoma ao acordar |
+| Bateria abaixo de 15%, com sessão | suspende | cai | preservado, retoma ao acordar |
+| Hibernação ou logoff | — | cai | **morre junto** |
+
+### Diagnóstico
+
+Quando algo não volta direito depois do ocioso, o coletor reúne num arquivo só o que
+normalmente se busca em cinco lugares — estados suportados (`powercfg /a`), valores do plano
+ativo, quem está segurando a máquina acordada, motivo do último wake, energia do adaptador,
+Fast Startup — e **correlaciona** cada evento de retorno com o `watchdog.log` e com o log do
+serviço na mesma janela de tempo:
+
+```powershell
+.\scripts\Get-PowerDiagnostics.ps1        # somente leitura; eleve para incluir o log do serviço
+```
+
+### O que não está coberto
+
+Nada disto foi validado num notebook real: a máquina de referência é um desktop, e o passo de
+energia sai limpo nela sem fazer nada.
+
+O que existe é `tests/Power.Harness.ps1`, que executa os scripts de verdade contra um
+`powercfg` e cmdlets de rede substituídos por stubs, numa cópia temporária do repositório — o
+daemon inclusive roda, com a máquina de estados inteira encenada. Isso já pagou por si,
+achando dois defeitos que o parser aprovava: um cast que **matava o daemon na partida, em
+qualquer máquina**, e o adaptador de rede sendo reescrito a cada execução.
+
+Mas stub não é sistema. **Nenhuma linha de `powercfg` gravou de verdade**, o Windows nunca
+deixou de suspender por causa do daemon, e o Agendador nunca disparou o trigger de resume.
+Está registrado como trabalho conhecido no [BACKLOG](BACKLOG.md), não como promessa.
+
+Também não está coberto: se, em Modern Standby, a máquina realmente atende conexão nova
+enquanto está em espera. Ligar a conectividade em espera torna isso *possível*; não prova que
+acontece.
 
 ---
 
@@ -493,10 +630,17 @@ Windows do usuário.
 | A conexão RustDesk cai | vive | **continua rodando** |
 | Você fecha o cliente Herdr ou o terminal | vive | **continua rodando** |
 | Você bloqueia a tela (`Win+L`) | vive | **continua rodando** |
+| Você fecha a tampa do notebook | vive | **continua rodando**\* |
+| A máquina suspende por ociosidade | vive | **continua rodando**\* |
 | Você desanexa (`prefix` + `q`) | vive | **continua rodando** |
 | **Logoff** | morre | **morre junto** |
 | **Reboot / shutdown** | morre | **morre junto** |
 | `herdr server stop` | morre | **morre junto** |
+
+\* com o passo de energia aplicado. Fechar a tampa não suspende mais, e a suspensão por
+ociosidade fica bloqueada enquanto há sessão remota — ver
+[Notebooks: bateria, tampa fechada e volta do ocioso](#notebooks-bateria-tampa-fechada-e-volta-do-ocioso).
+Suspender **não** mata o servidor: ele volta com a máquina. Quem mata é logoff ou reboot.
 
 Na primeira metade da tabela você reconecta e o build que estava a 40% está a 70%. É o caso
 de uso que justifica o Herdr aqui, e cobre tudo que é falha de rede ou de cliente — o
@@ -695,20 +839,26 @@ config/default.psd1             opções do RustDesk (copie para custom.psd1)
 config/local.psd1               opções do RustDesk.toml (copie para local-custom.psd1)
 config/version.psd1             versão fixada + SHA-256 do instalador
 config/herdr.psd1               opções do Herdr (copie para herdr-custom.psd1)
+config/power.psd1               energia em notebook (copie para power-custom.psd1)
 lib/RustDeskCommon.psm1         caminhos, elevação, controle do serviço
 lib/RustDeskToml.psm1           leitura/escrita do .toml preservando o formato
 scripts/Install-RustDesk.ps1    baixa o .msi fixado, verifica, serviço + recovery
 scripts/Set-RustDeskConfig.ps1  aplica as opções nas duas configs
 scripts/Set-RustDeskPassword.ps1  senha permanente, sem eco e sem histórico
-scripts/Install-Watchdog.ps1    watchdog + tarefa agendada
+scripts/Install-Watchdog.ps1    watchdog + tarefa agendada (boot, intervalo, resume)
+scripts/Set-PowerConfig.ps1     plano de energia e adaptador de rede (só notebook)
+scripts/Install-AwakeGuard.ps1  daemon que segura a suspensão durante a sessão
+scripts/Get-PowerDiagnostics.ps1  coletor read-only para o retorno do ocioso
 scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
 scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
 scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
-tests/RustDeskToml.Tests.ps1    30 testes, sem tocar em instalação real
+scripts/awake/                  template do daemon de energia
+tests/RustDeskToml.Tests.ps1    44 testes, sem tocar em instalação real
 tests/Test-Syntax.ps1           parser + ASCII em todos os scripts
-.github/workflows/ci.yml        roda os dois a cada PR e push na main
+tests/Power.Harness.ps1         30 testes de execução, com powercfg stubado
+.github/workflows/ci.yml        roda os três a cada PR e push na main
 ```
 
 ---
@@ -744,6 +894,32 @@ não Wayland.
 
 Coisas que custaram tempo para descobrir e estão codificadas aqui:
 
+- **`[uint32]0x80000000` estoura em PowerShell.** O literal hexadecimal é lido como `Int32`
+  (-2147483648) e o cast falha com *Value was either too large or too small for a UInt32*.
+  Essa é a constante `ES_CONTINUOUS` do `SetThreadExecutionState` — com ela, o daemon morria
+  na partida, em qualquer máquina. O parser não acusa; só executar acusa. Monte a flag com
+  `[Convert]::ToUInt32('80000000', 16)`. **Encontrado em 2026-08-20**, rodando o daemon num
+  harness com o resto stubado; há teste de regressão.
+- **`$array -notmatch 'x'` não significa "nenhum elemento casa".** Em array, `-notmatch`
+  devolve os elementos que *não* casam, e uma lista não-vazia é *truthy* — o assert passa
+  sempre. Para "nenhum", conte os que casam. Dois testes deste repositório deram falso
+  positivo por isso, e um deles escondia um bug real: o adaptador de rede sendo reescrito a
+  cada execução.
+- **`powercfg /setacvalueindex` não tem efeito sem `powercfg /setactive` depois.** O valor
+  entra no esquema e o sistema segue usando o antigo. O script imprime sucesso, a leitura
+  de conferência confirma, e a máquina continua suspendendo — a mesma família de falha do
+  `-WhatIf` que gravava: convincente e errada.
+- **Os rótulos do `powercfg` são traduzidos em Windows localizado.** Procurar por
+  `Current AC Power Setting Index` dá falso negativo em pt-BR, do mesmo jeito que
+  `IsInRole('Administrator')` com string. O que não muda é o formato do valor: os índices
+  saem como `0x00000000` e são os únicos campos nesse formato na saída de `/q` de um
+  subvalor — as duas últimas ocorrências são AC e DC, nessa ordem.
+- **`SetThreadExecutionState` é por *thread*, não por processo.** A chamada tem que sair da
+  mesma thread que continua viva. Um `Start-Job` ou runspace novo perde o bloqueio sem erro
+  nenhum, e a máquina suspende com a sessão remota aberta.
+- **Com Fast Startup ligado, desligar e ligar não avança o `LastBootUpTime`.** A sessão do
+  kernel é hibernada e restaurada. Qualquer guarda de "uma vez por boot" carimbada só com o
+  boot vira permanente — por isso o watchdog carimba boot **mais** último resume.
 - **Gravar o `.toml` com `Set-Content -Encoding UTF8` adiciona BOM.** O formato nativo do
   RustDesk é UTF-8 **sem** BOM com quebras LF. `lib/RustDeskToml.psm1` grava no formato
   certo e remove BOM existente; a verificação acusa se aparecer.

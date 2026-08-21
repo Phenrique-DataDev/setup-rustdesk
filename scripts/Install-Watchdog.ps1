@@ -3,7 +3,8 @@
     Instala o watchdog do RustDesk em ProgramData e cria a tarefa agendada.
 
 .DESCRIPTION
-    A tarefa roda como SYSTEM, no boot e a cada N minutos. Ela cobre o caso
+    A tarefa roda como SYSTEM: no boot, a cada N minutos e ao acordar de uma
+    suspensao. Ela cobre o caso
     de o servico ser removido ou desabilitado; as recovery actions do SCM
     (aplicadas por Install-RustDesk.ps1) cobrem quedas, que sao mais rapidas
     de detectar.
@@ -84,6 +85,18 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
     -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)).Repetition
 
+# Acordar de uma suspensao e um evento, nao um intervalo. Sem este trigger a
+# maquina passa ate $IntervalMinutes inteiros com o servico em estado ruim
+# depois de voltar - o que num notebook acontece varias vezes por dia.
+$triggers = @($trigger)
+try {
+    $triggers += New-RustDeskResumeTrigger -DelaySeconds 20
+    $log += 'trigger de resume adicionado (Power-Troubleshooter 1, atraso de 20s)'
+} catch {
+    $log += "AVISO: nao foi possivel criar o trigger de resume: $($_.Exception.Message)"
+    $log += '  O watchdog segue funcionando no boot e na repeticao; so nao reage na hora ao acordar.'
+}
+
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
 
 # DontStopIfGoingOnBatteries: em desktop com nobreak, uma queda de energia nao
@@ -95,7 +108,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 
-Register-ScheduledTask -TaskName $paths.TaskName -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $paths.TaskName -Action $action -Trigger $triggers `
     -Principal $principal -Settings $settings -Force | Out-Null
 
 # Confirmar em vez de afirmar: o Register pode falhar sem ser terminante, e
@@ -106,7 +119,7 @@ if (-not $reg) {
 }
 $rep = $reg.Triggers[0].Repetition
 $dur = if ($rep.Duration) { $rep.Duration } else { 'indefinida' }
-$log += "tarefa '$($paths.TaskName)' registrada: no boot + a cada $IntervalMinutes min, como SYSTEM"
+$log += "tarefa '$($paths.TaskName)' registrada: no boot, a cada $IntervalMinutes min e ao acordar, como SYSTEM"
 $log += "  repeticao: intervalo $($rep.Interval), duracao $dur"
 
 # --- 3) primeira execucao ---------------------------------------------
