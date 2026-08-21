@@ -15,6 +15,11 @@ Revisado em **2026-08-21**: fecharam os itens 4, 6, 8 e 9. Os três primeiros po
 Linux fica documentado, o Sandbox saiu da rota de teste e os ~10 s já tinham decisão tomada.
 O 9 por implementação: o CI passou a avisar quando o pin do RustDesk fica para trás.
 
+Segunda revisão de **2026-08-21**: fecharam os itens **3** e **7**, ambos por decisão de quem
+opera a máquina. Restam **0, 1 e 2** — o mesmo cenário sob dois ângulos —, e eles têm destino
+definido: **recebem um relatório quando o `Setup.ps1 -All` for executado num notebook**. Até
+lá não há trabalho a fazer neles; o que falta é a saída de uma execução real, não código.
+
 Ordenado por **risco de morder**, não por esforço.
 
 ---
@@ -57,9 +62,12 @@ Ainda assim, o essencial continua sem prova, e só um notebook fecha:
 | O carimbo de época destravando após suspensão real | A lógica de comparação foi testada; o resume real, não. |
 | `Disable-NetAdapterPowerManagement` no hardware | Só o stub e o `-WhatIf` foram cobertos. |
 
-**Próximo passo:** os itens 2 a 11 da seção *Verificação* do plano, num notebook real, com a
-saída guardada. Rodar `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar, para ter
-linha de base.
+**Próximo passo — combinado em 2026-08-21:** este item recebe um **relatório da execução num
+notebook**. A ordem é: `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar (linha de
+base, e é somente leitura), depois `.\Setup.ps1 -All` como Administrador, guardando a saída
+das duas coisas. Com ela em mãos os itens 2 a 11 da seção *Verificação* do plano viram
+conferência de evidência em vez de suposição. Até o relatório chegar não há trabalho a fazer
+aqui, e nada deve ser construído por cima do passo de energia.
 
 Duas perguntas em aberto que o diagnóstico deve responder, e que motivaram o coletor:
 
@@ -105,8 +113,12 @@ o instalador corretamente. Testar de verdade exige **uma VM Windows com imagem c
 O segundo falhou no Sandbox com `os error 2`, mas por causa do item 2 abaixo, então não há
 conclusão sobre ele.
 
-**Próximo passo:** a próxima máquina Windows real que for configurada com o repo fecha os
-dois de graça. Vale rodar `.\Setup.ps1 -All` lá e guardar a saída.
+**Próximo passo — combinado em 2026-08-21:** a próxima máquina Windows real configurada com
+o repo fecha os três de graça, e ela já tem nome: é o **notebook do item 0**. A mesma
+execução de `.\Setup.ps1 -All` que exercita o passo de energia também percorre a instalação
+do Herdr, a escrita da senha e o `msiexec` do pin — desde que seja uma máquina sem RustDesk e
+sem Herdr previamente instalados, que é o que dá valor ao teste. **O relatório dessa execução
+fecha este item junto com o 0 e o 2.**
 
 ---
 
@@ -121,21 +133,28 @@ falhas. `Install-RustDesk.ps1` passou a aguardar as configs nascerem (subindo a 
 zerado** — só sintaxe e os 27 testes da lib. É a mudança mais importante da sessão e a
 menos provada.
 
-**Próximo passo:** mesmo teste do item 1. São o mesmo cenário.
+**Próximo passo:** mesmo teste dos itens 0 e 1 — são o mesmo cenário, e o relatório da
+execução no notebook responde pelos três. O sinal a procurar na saída é específico: numa
+máquina zerada o `-All` **não** pode terminar com as 7 falhas de configuração; se terminar, a
+espera pelas configs nascerem não funcionou.
 
 ---
 
-## 3. `loginctl enable-linger` pendente (Linux)
+## 3. ~~`loginctl enable-linger` pendente (Linux)~~ — fechado em 2026-08-21
+
+**Fechado por decisão de quem opera a máquina.** O item sempre foi exatamente isso: uma
+decisão de operação, não trabalho de repositório. Ele fecha junto com o item 4 — o Linux
+fica como está, com o Herdr automatizado e o RustDesk documentado —, e o comando continua
+registrado aqui para quem quiser o servidor Herdr sobrevivendo ao fim da sessão:
 
 ```bash
 sudo loginctl enable-linger "$USER"
 ```
 
-Estado atual na máquina de referência: `Linger=no`. Sem isso o systemd encerra os serviços
-do usuário quando a última sessão dele fecha, e o servidor Herdr morre junto — o análogo
-exato do `No active console user logged on` do Windows.
-
-Exige root e senha interativa; ficou para quem opera a máquina decidir.
+Estado na máquina de referência quando o item foi escrito: `Linger=no`. Sem isso o systemd
+encerra os serviços do usuário quando a última sessão dele fecha, e o servidor Herdr morre
+junto — o análogo exato do `No active console user logged on` do Windows. Exige root e senha
+interativa, e é o tipo de mudança que nenhum script deste repositório deve tomar por conta.
 
 ---
 
@@ -246,7 +265,18 @@ Não é um problema de código deste repositório — é ambiente/ferramenta do 
 
 ---
 
-## 7. Teste manual que nenhuma verificação cobre
+## 7. ~~Teste manual que nenhuma verificação cobre~~ — fechado em 2026-08-21
+
+**Fechado por decisão.** O cenário já foi exercitado por completo três vezes (07/08 nas duas
+metades, 10/08 contra a config de conexão direta) e nunca falhou. O que mantinha o item
+aberto era a política de revalidar a cada mudança de config, e a mudança que ficou sem
+revalidação — `enable-check-update` nos dois `RustDesk.toml`, em 11/08 — é uma chave de
+checagem de atualização, sem relação plausível com autenticação na tela de logon. Continuar
+carregando o item por causa dela custava mais atenção do que o risco justifica.
+
+Fica valendo o de sempre, agora como recomendação e não como pendência: **é um ponto de dado
+de uma máquina**. Ao configurar outra, faça o teste lá (`Win+L`, conectar de outro
+dispositivo, abrir o Terminal). O histórico completo do que já foi provado segue abaixo.
 
 Conectar de outra máquina **com a tela bloqueada** e abrir o Terminal.
 
