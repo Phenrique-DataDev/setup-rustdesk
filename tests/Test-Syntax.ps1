@@ -22,7 +22,13 @@
 $ErrorActionPreference = 'Stop'
 $raiz = Split-Path -Parent $PSScriptRoot
 
-$arquivos = Get-ChildItem -LiteralPath $raiz -Recurse -File -Include '*.ps1', '*.psm1', '*.psd1' |
+# Filtrar por -Extension e nao por -Include: no Windows PowerShell 5.1 o -Include
+# e ignorado quando vem junto de -LiteralPath, e a varredura acaba pegando o repo
+# inteiro (BACKLOG.md, ci.yml, docs/linux.md vao parar no parser). No pwsh 7 o
+# filtro funciona, entao a divergencia so aparece na maquina real.
+$extensoes = '.ps1', '.psm1', '.psd1'
+$arquivos = Get-ChildItem -LiteralPath $raiz -Recurse -File |
+            Where-Object { $extensoes -contains $_.Extension } |
             Where-Object { $_.FullName.Split([IO.Path]::DirectorySeparatorChar) -notcontains '.git' } |
             Sort-Object FullName
 
