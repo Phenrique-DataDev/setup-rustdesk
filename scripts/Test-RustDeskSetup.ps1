@@ -47,7 +47,11 @@ function Get-FieldFingerprint([string]$Path, [string]$Key) {
     $valor = ($linha -split '=', 2)[1].Trim()
     if ($valor -match "^''$|^`"`"$") { return '<vazio>' }
     $bytes = [Text.Encoding]::UTF8.GetBytes($valor)
-    ([BitConverter]::ToString([Security.Cryptography.SHA256]::HashData($bytes)) -replace '-', '').Substring(0, 12)
+    # HashData() e .NET 5+: no Windows PowerShell 5.1 (.NET Framework) ele nao
+    # existe e a verificacao inteira aborta aqui. Create()/ComputeHash() vale nos dois.
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hash = $sha.ComputeHash($bytes) } finally { $sha.Dispose() }
+    ([BitConverter]::ToString($hash) -replace '-', '').Substring(0, 12)
 }
 
 function Test-Item($nome, $ok, $detalhe = '') {
