@@ -40,6 +40,16 @@
     # Standby; onde nao existe, o passo e pulado sem erro.
     ConnectivityInStandby = 1
 
+    # Modo de economia de energia do adaptador sem fio (plano de energia):
+    # 0 = desempenho maximo, 1 = economia baixa, 2 = media, 3 = maxima. O
+    # Equilibrado vem com economia media na bateria, e a placa passa a dormir
+    # entre pacotes - para o Terminal remoto isso vira pico de latencia e, em
+    # rede fraca, queda. O custo de bateria e pequeno perto do da tela.
+    # Em maquina com Modern Standby o Windows costuma ocultar esta opcao e
+    # deixar a decisao com o driver; ai o passo e pulado sem erro.
+    WirelessPowerSavingAC = 0
+    WirelessPowerSavingDC = 0
+
     # Desligar o "permitir que o computador desligue este dispositivo" do
     # adaptador de rede ativo. E causa classica de voltar da suspensao com a
     # rede fora do ar por alguns minutos. $null = nao mexer.

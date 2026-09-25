@@ -3,8 +3,8 @@
     Instala o watchdog do RustDesk em ProgramData e cria a tarefa agendada.
 
 .DESCRIPTION
-    A tarefa roda como SYSTEM: no boot, a cada N minutos e ao acordar de uma
-    suspensao. Ela cobre o caso
+    A tarefa roda como SYSTEM: no boot, a cada N minutos, ao acordar de uma
+    suspensao e quando o Windows conecta numa rede. Ela cobre o caso
     de o servico ser removido ou desabilitado; as recovery actions do SCM
     (aplicadas por Install-RustDesk.ps1) cobrem quedas, que sao mais rapidas
     de detectar.
@@ -97,6 +97,18 @@ try {
     $log += '  O watchdog segue funcionando no boot e na repeticao; so nao reage na hora ao acordar.'
 }
 
+# Rede conectada tambem e um evento. No Wi-Fi a rede sobe depois da passada do
+# boot, e o servico - que subiu com o DNS fora do ar - ficaria sem IPv6 ate a
+# proxima repeticao. Atraso de 30s para o Router Advertisement e o DNS
+# assentarem antes da checagem.
+try {
+    $triggers += New-RustDeskNetworkTrigger -DelaySeconds 30
+    $log += 'trigger de rede adicionado (NetworkProfile 10000, atraso de 30s)'
+} catch {
+    $log += "AVISO: nao foi possivel criar o trigger de rede: $($_.Exception.Message)"
+    $log += '  O watchdog segue funcionando; so nao reage na hora quando a rede conecta.'
+}
+
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
 
 # DontStopIfGoingOnBatteries: em desktop com nobreak, uma queda de energia nao
@@ -119,7 +131,7 @@ if (-not $reg) {
 }
 $rep = $reg.Triggers[0].Repetition
 $dur = if ($rep.Duration) { $rep.Duration } else { 'indefinida' }
-$log += "tarefa '$($paths.TaskName)' registrada: no boot, a cada $IntervalMinutes min e ao acordar, como SYSTEM"
+$log += "tarefa '$($paths.TaskName)' registrada: no boot, a cada $IntervalMinutes min, ao acordar e ao conectar na rede, como SYSTEM"
 $log += "  repeticao: intervalo $($rep.Interval), duracao $dur"
 
 # --- 3) primeira execucao ---------------------------------------------

@@ -249,12 +249,21 @@ if ($task) {
 
 # Trigger de resume: sem ele a maquina pode passar um intervalo inteiro do
 # watchdog com o servico em estado ruim depois de acordar.
+# Trigger de rede: sem ele, no Wi-Fi, o servico pode passar um intervalo
+# inteiro sem IPv6 depois do boot. Os dois sao MSFT_TaskEventTrigger; o que os
+# distingue e o provider na subscription.
 if ($task) {
-    $temResume = [bool](@($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskEventTrigger' }).Count)
-    if ($temResume) {
-        Test-Item 'trigger de resume (acorda -> verifica)' $true
-    } else {
-        Test-Item 'trigger de resume (acorda -> verifica)' 'aviso' 'reinstale com Setup.ps1 -Watchdog para ganhar reacao imediata ao acordar'
+    $eventos = @($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskEventTrigger' })
+    foreach ($gat in @(
+        @{ Rotulo = 'trigger de resume (acorda -> verifica)'; Provider = 'Power-Troubleshooter'; Ganho = 'reacao imediata ao acordar' },
+        @{ Rotulo = 'trigger de rede (conecta -> verifica)';  Provider = 'NetworkProfile';       Ganho = 'reacao imediata quando o Wi-Fi conecta' }
+    )) {
+        $tem = [bool](@($eventos | Where-Object { $_.Subscription -match $gat.Provider }).Count)
+        if ($tem) {
+            Test-Item $gat.Rotulo $true
+        } else {
+            Test-Item $gat.Rotulo 'aviso' "reinstale com Setup.ps1 -Watchdog para ganhar $($gat.Ganho)"
+        }
     }
 }
 

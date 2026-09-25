@@ -101,7 +101,8 @@ foreach ($item in @(
     @{ Sub = 'SUB_SLEEP';   Setting = 'STANDBYIDLE';   Rotulo = 'suspender por ociosidade' },
     @{ Sub = 'SUB_SLEEP';   Setting = 'HIBERNATEIDLE'; Rotulo = 'hibernar por ociosidade' },
     @{ Sub = 'SUB_VIDEO';   Setting = 'VIDEOIDLE';     Rotulo = 'desligar o painel' },
-    @{ Sub = 'SUB_NONE';    Setting = 'F15576E8-98B7-4186-B944-EAFA664402D9'; Rotulo = 'conectividade em espera' }
+    @{ Sub = 'SUB_NONE';    Setting = 'F15576E8-98B7-4186-B944-EAFA664402D9'; Rotulo = 'conectividade em espera' },
+    @{ Sub = '19CBB8FA-5279-450E-9FAC-8A3D5FEDD0C1'; Setting = '12BBEBE6-58D6-4636-95BB-3217EF867C1A'; Rotulo = 'economia de energia do Wi-Fi' }
 )) {
     $saida = (& powercfg /q SCHEME_CURRENT $item.Sub $item.Setting 2>&1 | Out-String)
     # Os rotulos do powercfg sao traduzidos; o formato 0x00000000 nao e.
@@ -152,6 +153,72 @@ foreach ($nic in $nics) {
     }
 }
 
+# --- Wi-Fi --------------------------------------------------------------
+# So relatorio, nunca ajuste: as propriedades avancadas mudam de nome por
+# fabricante (Intel, Realtek, MediaTek) e o DisplayName e traduzido. O que
+# vale aqui e ter a evidencia para decidir na mao.
+Add-Secao 'Wi-Fi - associacao, driver e quedas'
+$wifi = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+          Where-Object { $_.PhysicalMediaType -match '802\.11' -or $_.NdisPhysicalMedium -eq 9 })
+if ($wifi.Count -eq 0) {
+    Add-Linha 'Nenhum adaptador Wi-Fi nesta maquina.'
+} else {
+    # Sinal, banda, canal e taxa. Saida traduzida, entao vai crua. Contem o
+    # SSID e o BSSID: o relatorio e local e nao deve ir para o repositorio.
+    Add-Linha '--- netsh wlan show interfaces ---'
+    try {
+        $r = (& netsh wlan show interfaces 2>&1 | Out-String).TrimEnd()
+        Add-Linha $(if ($r) { $r } else { '(sem saida)' })
+    } catch { Add-Linha "FALHOU: $($_.Exception.Message)" }
+
+    foreach ($nic in $wifi) {
+        Add-Linha ''
+        Add-Linha "--- propriedades avancadas: $($nic.Name) [$($nic.InterfaceDescription)] ---"
+        # RegistryKeyword nao e traduzido: e por ele que se marca o que importa
+        # para estabilidade - roaming, banda preferida e economia de energia.
+        $props = @(Get-NetAdapterAdvancedProperty -Name $nic.Name -ErrorAction SilentlyContinue)
+        if ($props.Count -eq 0) {
+            Add-Linha '  o driver nao expoe propriedades avancadas'
+            continue
+        }
+        foreach ($p in ($props | Sort-Object RegistryKeyword)) {
+            # Marca '>>' e nao '*': as palavras-chave padrao do NDIS ja comecam
+            # com '*' (*EEE, *PMARPOffload) e a marca sumiria no meio delas.
+            $marca = if ($p.RegistryKeyword -match 'Roam|Band|MIMO|Power|uAPSD|Sleep|Throughput') { '>>' } else { '  ' }
+            Add-Linha ("{0} {1,-34} {2,-28} {3}" -f $marca, $p.RegistryKeyword, $p.DisplayValue, $p.DisplayName)
+        }
+        Add-Linha ''
+        Add-Linha '  >> = afeta estabilidade. Para um notebook parado num lugar, o que costuma'
+        Add-Linha '      ajudar: agressividade de roaming baixa, banda preferida 5 GHz e'
+        Add-Linha '      economia de energia MIMO desligada. Ajuste no Gerenciador de'
+        Add-Linha '      Dispositivos, uma propriedade por vez, medindo antes e depois.'
+    }
+
+    # 8001 = conectou, 8003 = desconectou (com o motivo). E aqui que "o Wi-Fi
+    # caiu" deixa de ser impressao.
+    Add-Linha ''
+    Add-Linha "--- conexoes e quedas do Wi-Fi (ultimas $Hours h) ---"
+    try {
+        $wl = @(Get-WinEvent -FilterHashtable @{
+                    LogName = 'Microsoft-Windows-WLAN-AutoConfig/Operational'
+                    Id = @(8001, 8003); StartTime = $desde } -ErrorAction Stop |
+                Sort-Object TimeCreated)
+        $quedas = @($wl | Where-Object { $_.Id -eq 8003 }).Count
+        Add-Linha "conexoes: $(@($wl | Where-Object { $_.Id -eq 8001 }).Count), quedas: $quedas"
+        foreach ($e in ($wl | Select-Object -Last 30)) {
+            $tipo = if ($e.Id -eq 8003) { 'CAIU     ' } else { 'CONECTOU ' }
+            $motivo = ''
+            if ($e.Id -eq 8003) {
+                $motivo = ($e.Message -split "`n" | Where-Object { $_ -match ':' } | Select-Object -Last 1)
+                if ($motivo) { $motivo = " - $($motivo.Trim())" }
+            }
+            Add-Linha "$($e.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))  $tipo$motivo"
+        }
+    } catch {
+        Add-Linha 'Nenhum evento de Wi-Fi na janela (ou o log WLAN-AutoConfig nao existe).'
+    }
+}
+
 # --- tarefas -----------------------------------------------------------
 Add-Secao 'tarefas agendadas do setup'
 foreach ($t in @($paths.TaskName, $paths.AwakeTask, 'HerdrServer')) {
@@ -163,7 +230,12 @@ foreach ($t in @($paths.TaskName, $paths.AwakeTask, 'HerdrServer')) {
     }
     $info = $task | Get-ScheduledTaskInfo
     Add-Linha "$t : $($task.State), ultimo run $($info.LastRunTime), resultado $($info.LastTaskResult)"
-    $tipos = ($task.Triggers | ForEach-Object { $_.CimClass.CimClassName }) -join ', '
+    # Os triggers de evento sao todos MSFT_TaskEventTrigger; so o provider na
+    # subscription diz se e o de resume ou o de rede.
+    $tipos = ($task.Triggers | ForEach-Object {
+        $n = $_.CimClass.CimClassName
+        if ($n -eq 'MSFT_TaskEventTrigger' -and $_.Subscription -match "Provider\[@Name='([^']+)'") { "$n ($($Matches[1]))" } else { $n }
+    }) -join ', '
     Add-Linha "  triggers: $tipos"
 }
 Add-Linha ''

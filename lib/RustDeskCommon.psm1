@@ -379,12 +379,57 @@ function New-RustDeskResumeTrigger {
     $xml = @"
 <QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]</Select></Query></QueryList>
 "@
+    return New-RustDeskEventTrigger -Subscription $xml -DelaySeconds $DelaySeconds
+}
+
+function New-RustDeskNetworkTrigger {
+    <#
+    .SYNOPSIS
+        Trigger de tarefa agendada que dispara quando o Windows conecta numa rede.
+    .DESCRIPTION
+        No cabo a rede ja esta pronta quando o watchdog roda no boot. No Wi-Fi
+        ela associa depois: a passada do boot ve a maquina sem IPv6 global, nao
+        faz nada, e o servico - que subiu com o DNS fora do ar - ficaria ate um
+        intervalo inteiro sem IPv6. Este trigger poe a checagem logo depois de a
+        rede subir, e tambem cobre troca de rede sem suspensao no meio.
+    .NOTES
+        NetworkProfile 10000 dispara varias vezes por boot ('Identificando...',
+        adaptadores virtuais do Hyper-V/WSL). Nao ha filtro de proposito: o
+        campo State nao tem semantica documentada, e filtrar errado perderia
+        justamente a conexao do Wi-Fi. A rajada e contida pelo
+        MultipleInstances IgnoreNew da tarefa, e cada passada custa ~1 s.
+    .OUTPUTS
+        Instancia CIM de MSFT_TaskEventTrigger, pronta para Register-ScheduledTask.
+    #>
+    [CmdletBinding()]
+    param([int]$DelaySeconds = 30)
+
+    $log = 'Microsoft-Windows-NetworkProfile/Operational'
+    $xml = @"
+<QueryList><Query Id="0" Path="$log"><Select Path="$log">*[System[Provider[@Name='Microsoft-Windows-NetworkProfile'] and EventID=10000]]</Select></Query></QueryList>
+"@
+    return New-RustDeskEventTrigger -Subscription $xml -DelaySeconds $DelaySeconds
+}
+
+function New-RustDeskEventTrigger {
+    <#
+    .SYNOPSIS
+        Monta um trigger de evento a partir de uma subscription XPath.
+    .NOTES
+        New-ScheduledTaskTrigger nao expoe triggers de evento - por isso a
+        instancia CIM crua.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Subscription,
+        [int]$DelaySeconds = 20
+    )
 
     $classe = Get-CimClass -ClassName MSFT_TaskEventTrigger `
                            -Namespace Root/Microsoft/Windows/TaskScheduler -ErrorAction Stop
     $t = New-CimInstance -CimClass $classe -ClientOnly
     $t.Enabled      = $true
-    $t.Subscription = $xml
+    $t.Subscription = $Subscription
     $t.Delay        = "PT${DelaySeconds}S"
     return $t
 }
@@ -501,4 +546,5 @@ Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths,
                               Get-RustDeskPin, Get-RustDeskVersion, Resolve-RustDeskLatestVersion,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI,
                               Test-IsLaptop, Get-BatteryPercent, Test-RemoteSessionActive,
-                              Get-LastResumeTime, Get-PowerEpochStamp, New-RustDeskResumeTrigger
+                              Get-LastResumeTime, Get-PowerEpochStamp, New-RustDeskResumeTrigger,
+                              New-RustDeskNetworkTrigger, New-RustDeskEventTrigger
