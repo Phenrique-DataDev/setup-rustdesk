@@ -46,6 +46,18 @@
     # mesma rede, sem precisar decorar o IP.
     'enable-lan-discovery'             = 'Y'
 
+    # --- fluidez da sessao ---------------------------------------------
+    # Os dois primeiros ja sao o padrao do RustDesk (prefixo 'enable-': so o
+    # 'N' explicito desliga). Ficam explicitos para nao depender do padrao de
+    # versoes futuras. enable-abr baixa fps e taxa quando o atraso passa de
+    # 150 ms; enable-hwcodec codifica pela placa de video.
+    'enable-abr'                       = 'Y'
+    'enable-hwcodec'                   = 'Y'
+    # Tira o papel de parede durante a sessao e devolve ao fim. O fundo e o
+    # que mais custa transmitir; sem ele a sessao abre e rola com menos dados.
+    # Prefixo 'allow-': o padrao e desligado, so 'Y' liga. Custo: quem esta na
+    # frente da maquina ve a area de trabalho sem fundo enquanto ha sessao.
+    'allow-remove-wallpaper'           = 'Y'
     # --- recursos gerais ----------------------------------------------
     'enable-keyboard'                  = 'Y'
     'enable-clipboard'                 = 'Y'
