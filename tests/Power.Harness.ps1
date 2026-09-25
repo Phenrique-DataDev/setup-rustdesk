@@ -597,6 +597,43 @@ It 'boot igual e resume novo produzem epocas diferentes' {
     Assert-True ($gravado -ne $e2) 'considerou a epoca nova como ja tentada - a trava continuaria'
 }
 
+# Saidas do sc.exe qfailure num Windows pt-BR. A primeira e a real do servico
+# rustdesk depois de recriado pela interface (2026-09-25); a segunda tem o
+# formato real de AcoesDeFalha com os valores que o repositorio aplica.
+$qfSemAcoes = @'
+[SC] QueryServiceConfig2 EXITO
+
+NOME_DO_SERVICO: rustdesk
+    PERIODO_DE_REDEFINICAO (segundos) : 0
+    MENSAGEM_DE_REINICIALIZACAO       :
+    LINHA_DE_COMANDO                  :
+'@
+$qfNossa = @'
+[SC] QueryServiceConfig2 EXITO
+
+NOME_DO_SERVICO: rustdesk
+    PERIODO_DE_REDEFINICAO (segundos) : 0
+    MENSAGEM_DE_REINICIALIZACAO       :
+    LINHA_DE_COMANDO                  :
+       ACOES_DE_FALHA                    : REINICIAR -- Espera = 5000 ms
+                                           REINICIAR -- Espera = 5000 ms
+                                           REINICIAR -- Espera = 5000 ms
+'@
+
+It 'recovery: servico recriado sem acoes e detectado' {
+    Assert-True (-not (Test-RecoveryConfigured $qfSemAcoes)) 'aprovou um servico sem recovery actions'
+}
+
+It 'recovery: as acoes que o repositorio aplica sao reconhecidas' {
+    Assert-True (Test-RecoveryConfigured $qfNossa) 'nao reconheceu restart/5000'
+}
+
+It 'recovery: 15000 e 150000 nao passam por 5000' {
+    # Com '-match 5000' solto, o atraso de outro servico aprovaria o nosso.
+    Assert-True (-not (Test-RecoveryConfigured ($qfNossa -replace '= 5000 ms', '= 15000 ms'))) 'casou 15000'
+    Assert-True (-not (Test-RecoveryConfigured ($qfNossa -replace '= 5000 ms', '= 150000 ms'))) 'casou 150000'
+}
+
 } finally {
     Remove-Item env:RDHARNESS_LAPTOP -ErrorAction SilentlyContinue
     Remove-Item env:RDHARNESS_ELEVATED -ErrorAction SilentlyContinue

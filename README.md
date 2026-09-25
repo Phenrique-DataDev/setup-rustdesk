@@ -304,8 +304,8 @@ Tarefa "HerdrServer"                 usuário, no logon, sem limite de duração
 
 Duas camadas de proteção, de propósito: as **recovery actions do SCM** cobrem quedas do
 serviço em segundos; o **watchdog** cobre o que o SCM não vê — serviço desinstalado,
-desabilitado, `stop-service = 'Y'` na config (que deixa o acesso remoto morto com todos os
-indicadores verdes), ou o serviço **sem IPv6**.
+desabilitado, **sem as próprias recovery actions**, `stop-service = 'Y'` na config (que deixa
+o acesso remoto morto com todos os indicadores verdes), ou o serviço **sem IPv6**.
 
 O caso do IPv6 é uma corrida no boot: o serviço é `AUTO_START` e sobe antes de a rede ficar
 pronta. O log mostra o motivo — `Failed to bind IPv6 socket ... (os error 11001)`, que é
@@ -966,6 +966,15 @@ não Wayland.
 ## Armadilhas conhecidas
 
 Coisas que custaram tempo para descobrir e estão codificadas aqui:
+
+- **Parar e iniciar o serviço pela interface do RustDesk recria o serviço do zero.** *Parar
+  serviço* faz `sc delete`; *Iniciar serviço* faz `sc create` — um serviço novo, **sem as
+  recovery actions** que o `-Install` aplicou. O `--install-service` que o watchdog usa para
+  reinstalar cai no mesmo caminho. Sem recovery, uma queda do serviço espera a próxima passada
+  do watchdog (até 10 min) em vez de 5 s. O watchdog agora reaplica. E ao religar, o RustDesk
+  grava `stop-service = ''`, que **remove** a chave: ausente é o estado canônico de "ligado",
+  e a verificação aceita. **Encontrado em 2026-09-25**, na máquina de referência, cinco dias
+  depois de o serviço ser parado pela interface.
 
 - **`[uint32]0x80000000` estoura em PowerShell.** O literal hexadecimal é lido como `Int32`
   (-2147483648) e o cast falha com *Value was either too large or too small for a UInt32*.

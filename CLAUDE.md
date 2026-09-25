@@ -101,6 +101,11 @@ afetam quem edita este repo:
   sem isso o `-WhatIf` imprime simulação e grava no disco. Efeito colateral fora do módulo
   (parar/subir serviço) precisa de guarda própria. Coberto por teste de regressão.
 - **`IsInRole('Administrator')` com string falha em Windows pt-BR.** Use `Test-Elevated`.
+- **Parar/iniciar o serviço pela UI do RustDesk recria o serviço** (`sc delete` + `sc create`)
+  e perde as recovery actions; o watchdog reaplica. `stop-service` **ausente** equivale a
+  `'N'` — é como o próprio RustDesk grava ao religar. Não exija `'N'` literal.
+- **Checar `sc.exe qfailure` por `5000` solto casa `15000`.** Use `(?<!\d)5000(?!\d)`; as
+  recovery actions estão duplicadas no watchdog (template isolado) e um teste as mantém iguais.
 - **`Get-ScheduledTask` sem elevação devolve vazio** para tarefas de SYSTEM em vez de negar
   acesso — falso negativo silencioso. Tarefas do próprio usuário (como `HerdrServer`) são
   consultáveis sem elevação.
