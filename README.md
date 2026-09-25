@@ -105,6 +105,7 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | `.\Setup.ps1 -Herdr` | Instala o Herdr, aplica a config e põe o servidor no logon | não |
 | `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\scripts\Get-PowerDiagnostics.ps1` | Coleta o estado de energia num relatório. Não altera nada. | não\*\* |
+| `.\scripts\Show-NetworkCheck.ps1` | Página no navegador com o botão *Verificar rede*. Não altera nada. | não |
 | `.\scripts\Install-AwakeGuard.ps1 -Uninstall` | Remove o daemon de energia | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
 | `.\tests\RustDeskToml.Tests.ps1` | Testes da biblioteca (em arquivos temporários) | não |
@@ -512,6 +513,26 @@ junto das falhas de DNS (`DNS-Client` 1014) — ver
 ```powershell
 .\scripts\Get-PowerDiagnostics.ps1        # somente leitura; eleve para incluir o log do serviço
 ```
+
+Para uma checagem rápida da rede, sem ler relatório, há uma página com o botão **Verificar
+rede**:
+
+```powershell
+.\scripts\Show-NetworkCheck.ps1           # abre no navegador; -Json roda uma vez e imprime
+```
+
+Ela mostra, numa caixa na própria página: adaptador e sinal do Wi-Fi, IP/gateway/DNS, ping no
+roteador e na internet (latência, perda, jitter), DNS e conexão TCP ao servidor do RustDesk,
+serviço, firewall, tráfego e portas efêmeras em uso agora, e o histórico de esgotamento de
+portas, quedas de rede e timeouts de DNS. O botão **Copiar resultado** dá o texto para colar
+numa conversa.
+
+A página é o `scripts\network-check.html`. Aberta direto com dois cliques ela só avisa que
+precisa do script: um HTML sozinho não consegue pingar nem ler o firewall — o navegador não
+deixa. Por isso o script sobe um servidor mínimo **só em `127.0.0.1`**, numa porta aleatória, e a página chama
+o script. O endereço leva um token aleatório e o servidor confere o `Host`: outra página
+aberta no navegador não dispara a análise nem lê o resultado. Não altera nada, não precisa de
+Administrador, e encerra pelo botão **Encerrar**, por Ctrl+C ou após 15 minutos sem uso.
 
 ### O que não está coberto
 
@@ -984,6 +1005,8 @@ scripts/Get-PowerDiagnostics.ps1  coletor read-only para o retorno do ocioso
 scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
 scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
 scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
+scripts/Show-NetworkCheck.ps1   serve a página "Verificar rede" e roda as checagens
+scripts/network-check.html      a página: botão, caixa de resultado, estilo
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
 scripts/awake/                  template do daemon de energia
