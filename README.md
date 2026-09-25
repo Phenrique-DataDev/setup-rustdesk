@@ -527,8 +527,9 @@ serviço, firewall, tráfego e portas efêmeras em uso agora, e o histórico de 
 portas, quedas de rede e timeouts de DNS. O botão **Copiar resultado** dá o texto para colar
 numa conversa.
 
-Um HTML sozinho não consegue pingar nem ler o firewall — o navegador não deixa. Por isso o
-script sobe um servidor mínimo **só em `127.0.0.1`**, numa porta aleatória, e a página chama
+A página é o `scripts\network-check.html`. Aberta direto com dois cliques ela só avisa que
+precisa do script: um HTML sozinho não consegue pingar nem ler o firewall — o navegador não
+deixa. Por isso o script sobe um servidor mínimo **só em `127.0.0.1`**, numa porta aleatória, e a página chama
 o script. O endereço leva um token aleatório e o servidor confere o `Host`: outra página
 aberta no navegador não dispara a análise nem lê o resultado. Não altera nada, não precisa de
 Administrador, e encerra pelo botão **Encerrar**, por Ctrl+C ou após 15 minutos sem uso.
@@ -1004,7 +1005,8 @@ scripts/Get-PowerDiagnostics.ps1  coletor read-only para o retorno do ocioso
 scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
 scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
 scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
-scripts/Show-NetworkCheck.ps1   página local "Verificar rede" (read-only)
+scripts/Show-NetworkCheck.ps1   serve a página "Verificar rede" e roda as checagens
+scripts/network-check.html      a página: botão, caixa de resultado, estilo
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
 scripts/awake/                  template do daemon de energia
