@@ -61,6 +61,8 @@ Ainda assim, o essencial continua sem prova, e só um notebook fecha:
 | O trigger de resume **disparando** | O objeto é montado e aceito; que o Agendador o acione ao acordar, não foi visto. |
 | O carimbo de época destravando após suspensão real | A lógica de comparação foi testada; o resume real, não. |
 | `Disable-NetAdapterPowerManagement` no hardware | Só o stub e o `-WhatIf` foram cobertos. |
+| A economia de energia do Wi-Fi gravada pelo `powercfg` real | Entrou em 2026-09-25. Leitura conferida na máquina de referência; escrita só no stub. Em Modern Standby a opção pode estar oculta — aí o esperado é `[PULADO]`, e o relatório precisa mostrar qual dos dois aconteceu. |
+| O trigger de rede **disparando** numa troca de Wi-Fi | Entrou em 2026-09-25. A consulta casa com os eventos reais da máquina de referência (cabo); no Wi-Fi, o que tem que aparecer no `watchdog.log` é uma passada ~30 s depois de associar, e o reparo de IPv6 nela se o serviço subiu sem DNS. |
 
 **Próximo passo — combinado em 2026-08-21:** este item recebe um **relatório da execução num
 notebook**. A ordem é: `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar (linha de

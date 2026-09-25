@@ -172,7 +172,7 @@ notepad config\custom.psd1
 
 Por padrão **toda** conexão passa pelo servidor de rendezvous público. O RustDesk tenta
 furar o NAT e, quando não consegue, espera o timeout antes de pedir relay. Nos logs desta
-máquina o padrão é sempre o mesmo:
+máquina, em agosto de 2026, o padrão se repetia:
 
 ```
 00:11:03  Punch tcp hole to <peer>:1531
@@ -180,8 +180,20 @@ máquina o padrão é sempre o mesmo:
 00:11:14  create_relay requested ... ovh-da1      ← relay só 10 s depois
 ```
 
-Esses ~10 segundos de "carregando" são o **timeout do punch**, não lentidão do relay — e
-nenhuma opção do RustDesk encurta esse timeout. O que a configuração pode fazer é abrir um
+Esses ~10 segundos de "carregando" são o **timeout do punch**, não lentidão do relay. Ele é
+calculado por **quem conecta**, a partir do tipo de NAT dos dois lados e do histórico de
+falhas daquele peer — por isso o mesmo host pode abrir rápido para um cliente e devagar para
+outro. Em 2026-09-24, duas conexões vindas de uma rede externa abriram **direto, por TCP
+punch, em ~0,6 s**, sem relay:
+
+```
+14:03:04.015  Punch tcp hole to <peer>:61715
+14:03:04.591  #1706 Connection opened from <peer>:61715.   ← sem create_relay
+```
+
+A única opção que pula o timeout é `force-always-relay` (*Sempre conectar via relay*),
+por peer, no cliente. Ela **não** é recomendada aqui: troca um P2P que funciona por relay
+público, mais distante e compartilhado. O que a configuração do host pode fazer é abrir um
 caminho que não passa por lá:
 
 | Chave | Valor | Por quê |
@@ -281,7 +293,7 @@ C:\ProgramData\RustDesk\
   watchdog.log                       rotaciona em 1 MB, mantém 2000 linhas
   rustdesk-awake.ps1                 daemon de energia (só em notebook)
   awake.log                          transições do bloqueio de suspensão
-Tarefa "RustDeskWatchdog"            SYSTEM, no boot, a cada 10 min e ao acordar
+Tarefa "RustDeskWatchdog"            SYSTEM, no boot, a cada 10 min, ao acordar e ao conectar na rede
 Tarefa "RustDeskAwake"               SYSTEM, só em notebook, sem limite de duração
 
 %LOCALAPPDATA%\Programs\Herdr\       binário (instalador oficial do herdr.dev)
@@ -295,10 +307,17 @@ serviço em segundos; o **watchdog** cobre o que o SCM não vê — serviço des
 desabilitado, `stop-service = 'Y'` na config (que deixa o acesso remoto morto com todos os
 indicadores verdes), ou o serviço **sem IPv6**.
 
-O caso do IPv6 é uma corrida no boot: o serviço é `AUTO_START` e sobe antes de o Router
-Advertisement completar, então falha ao resolver os STUN IPv6 e segue sem IPv6 até alguém
-reiniciá-lo. Como **IPv6 não tem NAT**, perder isso custa justamente o caminho que dispensa
-hole punching.
+O caso do IPv6 é uma corrida no boot: o serviço é `AUTO_START` e sobe antes de a rede ficar
+pronta. O log mostra o motivo — `Failed to bind IPv6 socket ... (os error 11001)`, que é
+`WSAHOST_NOT_FOUND`: o **DNS** ainda não resolve os servidores STUN, e o serviço segue sem
+IPv6 até alguém reiniciá-lo. Não é raro: na máquina de referência aconteceu em **11 dos 13**
+boots de 16 a 25/09/2026, e o watchdog corrigiu cada um cerca de 44 s depois do boot. Como
+**IPv6 não tem NAT**, perder isso custa justamente o caminho que dispensa hole punching.
+
+No cabo, a rede está pronta quando o watchdog roda no boot. **No Wi-Fi, não**: a passada do
+boot vê a máquina sem IPv6 global e não age. Por isso a tarefa também dispara quando o Windows
+conecta numa rede (`NetworkProfile` 10000, 30 s de atraso) — ver
+[Acordar e conectar viraram eventos](#acordar-e-conectar-viraram-eventos).
 
 O reinício é deliberadamente conservador, porque derruba sessão ativa:
 
@@ -350,6 +369,7 @@ Os valores ficam em `config/power.psd1` (copie para `power-custom.psd1` para alt
 | Desligar o painel | 10 min / 3 min | Economia gratuita: a captura de tela do RustDesk continua funcionando com o monitor apagado, e em notebook o painel é o maior consumidor isolado. |
 | Conectividade de rede em espera | ligada | Só existe em máquina com Modern Standby (S0ix); onde não existe, o passo é pulado sem erro. |
 | Power saving do adaptador de rede | desligado | *Permitir que o computador desligue este dispositivo* é o suspeito número um de "acordou, mas o RustDesk só reconectou minutos depois". |
+| Economia de energia do adaptador sem fio | desempenho máximo, na tomada e na bateria | O Equilibrado vem com economia **média na bateria**: a placa dorme entre pacotes, e no Terminal remoto isso vira pico de latência e, em sinal fraco, queda. Em máquina com Modern Standby o Windows costuma ocultar a opção e deixar com o driver; aí o passo é pulado sem erro. |
 
 ### A suspensão na bateria não é desligada — ela é bloqueada só quando importa
 
@@ -370,11 +390,21 @@ Três detalhes que decidem se isso funciona:
 Sair sempre solta: há um `finally` e um handler de `PowerShell.Exiting`. Um daemon morto
 deixando a máquina insone para sempre seria pior do que não ter daemon.
 
-### Acordar virou um evento
+### Acordar e conectar viraram eventos
 
-O watchdog ganhou um segundo gatilho, por evento: `Microsoft-Windows-Power-Troubleshooter`
-ID 1, com 20 segundos de atraso para o Wi-Fi reassociar antes da checagem. Sem ele, a máquina
-podia passar um intervalo inteiro depois de acordar com o serviço em estado ruim.
+O watchdog tem dois gatilhos por evento, além do boot e da repetição de 10 min:
+
+| Evento | Atraso | Sem ele |
+|---|---|---|
+| `Microsoft-Windows-Power-Troubleshooter` ID 1 (acordou) | 20 s, para o Wi-Fi reassociar | a máquina podia passar um intervalo inteiro depois de acordar com o serviço em estado ruim |
+| `Microsoft-Windows-NetworkProfile` ID 10000 (conectou numa rede) | 30 s, para o DNS e o Router Advertisement assentarem | no Wi-Fi, o serviço que subiu com o DNS fora do ar ficaria até 10 min sem IPv6 — a passada do boot roda antes de o Wi-Fi associar e não vê IPv6 para corrigir |
+
+O de rede também cobre **trocar de rede sem suspender** (sair de casa para o hotspot do
+celular). Ele dispara várias vezes por boot — o Windows registra `Identificando...` e os
+adaptadores virtuais do Hyper-V/WSL como conexões — e isso é deliberado: o campo que
+distinguiria "conectou com internet" não tem semântica documentada, e filtrar errado perderia
+justamente a conexão do Wi-Fi. A rajada é contida pelo `IgnoreNew` da tarefa, e cada passada
+custa cerca de 1 s.
 
 Junto veio uma correção que **não é opcional**. A guarda do reparo de IPv6 era "no máximo uma
 vez por boot", carimbada com `LastBootUpTime`. Num portátil, que suspende várias vezes por dia
@@ -409,7 +439,15 @@ Quando algo não volta direito depois do ocioso, o coletor reúne num arquivo s�
 normalmente se busca em cinco lugares — estados suportados (`powercfg /a`), valores do plano
 ativo, quem está segurando a máquina acordada, motivo do último wake, energia do adaptador,
 Fast Startup — e **correlaciona** cada evento de retorno com o `watchdog.log` e com o log do
-serviço na mesma janela de tempo:
+serviço na mesma janela de tempo.
+
+Quando há Wi-Fi, o relatório traz também sinal, banda, canal e taxa (`netsh wlan show
+interfaces`), as propriedades avançadas do driver — com `>>` nas que afetam estabilidade:
+agressividade de roaming, banda preferida, economia de energia MIMO — e cada conexão e queda
+do Wi-Fi na janela, com o motivo (`WLAN-AutoConfig` 8001/8003). É só relatório: os nomes
+dessas propriedades mudam por fabricante e são traduzidos, então ajustá-las é decisão
+manual, uma por vez, medindo antes e depois. O arquivo contém o SSID; ele é local e não deve
+ir para o repositório.
 
 ```powershell
 .\scripts\Get-PowerDiagnostics.ps1        # somente leitura; eleve para incluir o log do serviço
@@ -426,8 +464,11 @@ daemon inclusive roda, com a máquina de estados inteira encenada. Isso já pago
 achando dois defeitos que o parser aprovava: um cast que **matava o daemon na partida, em
 qualquer máquina**, e o adaptador de rede sendo reescrito a cada execução.
 
-Mas stub não é sistema. **Nenhuma linha de `powercfg` gravou de verdade**, o Windows nunca
-deixou de suspender por causa do daemon, e o Agendador nunca disparou o trigger de resume.
+Mas stub não é sistema. **Nenhuma linha de `powercfg` gravou de verdade** (a economia de
+energia do Wi-Fi inclusive), o Windows nunca deixou de suspender por causa do daemon, e o
+Agendador nunca disparou o trigger de resume. O trigger de rede tem uma evidência a mais — a
+consulta dele casa com os eventos reais da máquina de referência —, mas nunca foi visto
+disparando numa troca de Wi-Fi, que é o caso para o qual existe.
 Está registrado como trabalho conhecido no [BACKLOG](BACKLOG.md), não como promessa.
 
 Também não está coberto: se, em Modern Standby, a máquina realmente atende conexão nova
@@ -651,6 +692,31 @@ Suspender **não** mata o servidor: ele volta com a máquina. Quem mata é logof
 Na primeira metade da tabela você reconecta e o build que estava a 40% está a 70%. É o caso
 de uso que justifica o Herdr aqui, e cobre tudo que é falha de rede ou de cliente — o
 comum quando se acessa de fora.
+
+#### Quando a rede oscila: mantenha o Terminal do RustDesk vivo
+
+O Herdr preserva o **trabalho**; o **Terminal do RustDesk** é outra camada. Por padrão, quando
+a conexão cai, o RustDesk encerra no host o shell daquele Terminal (no código, o serviço de
+terminal não persistente é removido quando a conexão termina). O `herdr server` sobrevive,
+mas ao reconectar você abre um Terminal novo e reatacha na mão.
+
+Com Wi-Fi instável — de qualquer um dos lados — isso vira rotina. A opção que resolve fica
+**no aparelho que conecta**, não no host, por isso este repositório não a aplica:
+
+| Onde | Caminho (interface em pt-BR) | Alcance |
+|---|---|---|
+| Desktop | **Configurações → Exibição → Outras Opções Padrão → Manter sessões de terminal ao desconectar** | padrão para todos os peers |
+| Android | **Configurações → Configurações de exibição → Outras Opções Padrão →** mesma opção | padrão para todos os peers |
+| Desktop, só um peer | menu da aba do Terminal → **Manter sessões de terminal ao desconectar** | aquele peer |
+
+A chave interna é `terminal-persistent`. Com ela ligada, o shell continua vivo no host depois
+da queda, e a reconexão volta nele. Um Terminal persistente que ficou sem nenhuma aba aberta é
+limpo depois de 2 h ociosas. Os nomes e o comportamento foram conferidos no código do
+RustDesk 1.4.9; a reconexão com a opção ligada ainda não foi exercitada nesta stack.
+
+O que **não** ajuda aqui é `force-always-relay` (*Sempre conectar via relay*): ele só pula a
+espera do punch na hora de conectar, e troca um P2P que funciona por um relay mais distante.
+Ver [Conexão direta](#conexão-direta-o-que-dá-para-fazer-contra-a-demora-de-10-s).
 
 #### O que `resume_agents_on_restore` e `pane_history` realmente fazem
 

@@ -107,13 +107,16 @@ $global:plano = @{}; $global:chamadas = @(); $global:ativado = $false
 $global:temS0 = $false; $global:escritaFajuta = $false; $global:nicDesligado = $false
 
 function Reset-Plano {
-    param([bool]$ComS0 = $false, [bool]$ComTampa = $true, [bool]$Fajuta = $false)
+    param([bool]$ComS0 = $false, [bool]$ComTampa = $true, [bool]$Fajuta = $false, [bool]$ComWifi = $true)
     $global:plano = @{
         'SUB_BUTTONS/LIDACTION'   = @{ Ac = 1;     Dc = 1 }
         'SUB_SLEEP/STANDBYIDLE'   = @{ Ac = 1800;  Dc = 900 }
         'SUB_SLEEP/HIBERNATEIDLE' = @{ Ac = 10800; Dc = 5400 }
         'SUB_VIDEO/VIDEOIDLE'     = @{ Ac = 600;   Dc = 300 }
     }
+    # Default do Equilibrado: desempenho maximo na tomada, economia media (2)
+    # na bateria.
+    if ($ComWifi) { $global:plano['19CBB8FA-5279-450E-9FAC-8A3D5FEDD0C1/12BBEBE6-58D6-4636-95BB-3217EF867C1A'] = @{ Ac = 0; Dc = 2 } }
     if ($ComS0) { $global:plano['SUB_NONE/F15576E8-98B7-4186-B944-EAFA664402D9'] = @{ Ac = 0; Dc = 0 } }
     if (-not $ComTampa) { $global:plano.Remove('SUB_BUTTONS/LIDACTION') }
     $global:chamadas = @(); $global:ativado = $false
@@ -235,6 +238,7 @@ It 'em notebook, aplica os subvalores e ativa o esquema' {
     Assert-Equal 0    $global:plano['SUB_SLEEP/HIBERNATEIDLE'].Dc 'hibernar DC'
     Assert-Equal 600  $global:plano['SUB_VIDEO/VIDEOIDLE'].Ac     'painel AC'
     Assert-Equal 180  $global:plano['SUB_VIDEO/VIDEOIDLE'].Dc     'painel DC'
+    Assert-Equal 0    $global:plano['19CBB8FA-5279-450E-9FAC-8A3D5FEDD0C1/12BBEBE6-58D6-4636-95BB-3217EF867C1A'].Dc 'Wi-Fi DC'
     Assert-True $global:ativado 'powercfg /setactive nao foi chamado - os valores nao valeriam'
     Assert-True ($saida -match 'APLICADO') 'nada foi reportado como aplicado'
 }
@@ -288,6 +292,14 @@ It 'subvalor nao exposto pelo plano vira PULADO, nao falha' {
     Reset-Plano -ComTampa $false
     $saida = Invoke-SetPower
     Assert-True ($saida -match 'PULADO.*tampa') 'a tampa ausente deveria ser pulada'
+}
+
+It 'sem a opcao de Wi-Fi no plano, ela e pulada sem erro e sem escrita' {
+    # Modern Standby costuma ocultar o subgrupo; maquina sem Wi-Fi nem o tem.
+    Reset-Plano -ComWifi $false
+    $saida = Invoke-SetPower
+    Assert-True ($saida -match 'PULADO.*Wi-Fi') 'a opcao ausente deveria ser pulada'
+    Assert-True (-not (Test-Chamou 'valueindex SCHEME_CURRENT 19CBB8FA')) 'tentou gravar uma chave que nao existe'
 }
 
 It 'powercfg que aceita e ignora a escrita e pego pela releitura' {
@@ -463,6 +475,19 @@ It 'o trigger de resume vira XML de subscription valido' {
     Assert-True ($t.Subscription -match 'EventID=1') 'id de evento errado'
 }
 
+It 'o trigger de rede vira XML de subscription valido' {
+    $t = New-RustDeskNetworkTrigger -DelaySeconds 30
+    Assert-Equal 'MSFT_TaskEventTrigger' $t.CimClass.CimClassName 'classe errada'
+    Assert-Equal 'PT30S' $t.Delay 'atraso errado'
+    Assert-True $t.Enabled 'trigger nasceu desabilitado'
+    $xml = [xml]$t.Subscription
+    # o canal e o Operational, nao o System: no System o evento nao existe e o
+    # trigger ficaria mudo sem erro nenhum
+    Assert-Equal 'Microsoft-Windows-NetworkProfile/Operational' $xml.QueryList.Query.Path 'canal errado'
+    Assert-True ($t.Subscription -match "@Name='Microsoft-Windows-NetworkProfile'") 'provider errado'
+    Assert-True ($t.Subscription -match 'EventID=10000') 'id de evento errado'
+}
+
 It 'o cmdlet aceita boot + repeticao + evento no mesmo array' {
     # ponto de risco: misturar trigger de New-ScheduledTaskTrigger com instancia
     # CIM crua. New-ScheduledTask valida sem gravar no Agendador.
@@ -471,10 +496,13 @@ It 'o cmdlet aceita boot + repeticao + evento no mesmo array' {
         -RepetitionInterval (New-TimeSpan -Minutes 10)).Repetition
     $tarefa = New-ScheduledTask `
         -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile') `
-        -Trigger @($tr, (New-RustDeskResumeTrigger -DelaySeconds 20)) `
+        -Trigger @($tr, (New-RustDeskResumeTrigger -DelaySeconds 20), (New-RustDeskNetworkTrigger -DelaySeconds 30)) `
         -Principal (New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest) `
         -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries)
-    Assert-Equal 2 @($tarefa.Triggers).Count 'a tarefa nao ficou com os dois triggers'
+    Assert-Equal 3 @($tarefa.Triggers).Count 'a tarefa nao ficou com os tres triggers'
+    $subs = @($tarefa.Triggers | ForEach-Object { $_.Subscription }) -join ' '
+    Assert-True ($subs -match 'Power-Troubleshooter') 'perdeu o trigger de resume'
+    Assert-True ($subs -match 'NetworkProfile') 'perdeu o trigger de rede'
     $classes = @($tarefa.Triggers | ForEach-Object { $_.CimClass.CimClassName })
     Assert-True ($classes -contains 'MSFT_TaskEventTrigger') 'perdeu o trigger de evento'
     Assert-True ($classes -contains 'MSFT_TaskBootTrigger')  'perdeu o trigger de boot'

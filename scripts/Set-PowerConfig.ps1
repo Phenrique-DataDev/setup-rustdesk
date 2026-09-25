@@ -102,7 +102,12 @@ $aplicar = @(
     @{ Sub = 'SUB_BUTTONS'; Setting = 'LIDACTION';     Ac = 'LidActionAC';     Dc = 'LidActionDC';     Rotulo = 'acao ao fechar a tampa' },
     @{ Sub = 'SUB_SLEEP';   Setting = 'STANDBYIDLE';   Ac = 'StandbyIdleAC';   Dc = 'StandbyIdleDC';   Rotulo = 'suspender por ociosidade (s)' },
     @{ Sub = 'SUB_SLEEP';   Setting = 'HIBERNATEIDLE'; Ac = 'HibernateIdleAC'; Dc = 'HibernateIdleDC'; Rotulo = 'hibernar por ociosidade (s)' },
-    @{ Sub = 'SUB_VIDEO';   Setting = 'VIDEOIDLE';     Ac = 'VideoIdleAC';     Dc = 'VideoIdleDC';     Rotulo = 'desligar o painel (s)' }
+    @{ Sub = 'SUB_VIDEO';   Setting = 'VIDEOIDLE';     Ac = 'VideoIdleAC';     Dc = 'VideoIdleDC';     Rotulo = 'desligar o painel (s)' },
+    # O subgrupo do adaptador sem fio nao tem alias no powercfg: so GUID.
+    # Sem Wi-Fi, ou com a opcao oculta pelo Modern Standby, o /q nao devolve
+    # indice e o item vira [PULADO] no laco abaixo.
+    @{ Sub = '19CBB8FA-5279-450E-9FAC-8A3D5FEDD0C1'; Setting = '12BBEBE6-58D6-4636-95BB-3217EF867C1A'
+       Ac = 'WirelessPowerSavingAC'; Dc = 'WirelessPowerSavingDC'; Rotulo = 'economia de energia do Wi-Fi' }
 )
 
 if ($temModernStandby) {

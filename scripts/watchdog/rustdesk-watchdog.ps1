@@ -3,7 +3,8 @@
     Watchdog do RustDesk: garante servico instalado, rodando e habilitado.
 
 .DESCRIPTION
-    Roda como SYSTEM via tarefa agendada, a cada N minutos. Verifica, nesta ordem:
+    Roda como SYSTEM via tarefa agendada: no boot, a cada N minutos, ao acordar
+    de uma suspensao e quando o Windows conecta numa rede. Verifica, nesta ordem:
       1. o binario existe;
       2. o servico existe (reinstala se sumiu);
       3. o servico esta Running (inicia se caiu);
@@ -15,9 +16,14 @@
     recusa conexoes: o acesso remoto fica morto com todos os indicadores verdes.
 
     O item 6 existe por uma corrida no boot: o servico e AUTO_START e sobe
-    antes de o Router Advertisement completar, entao falha ao resolver os STUN
-    IPv6 e segue SEM IPv6 ate alguem reinicia-lo. Como IPv6 nao tem NAT, perder
-    isso significa perder o caminho que dispensa hole punching.
+    antes de a rede ficar pronta. O log mostra 'Failed to bind IPv6 socket ...
+    os error 11001' (WSAHOST_NOT_FOUND): o DNS ainda nao resolve os STUN, e o
+    servico segue SEM IPv6 ate alguem reinicia-lo. Como IPv6 nao tem NAT,
+    perder isso significa perder o caminho que dispensa hole punching.
+
+    No Wi-Fi a rede sobe depois da passada do boot, que por isso ve a maquina
+    sem IPv6 global e nao age. Quem cobre esse caso e o trigger de rede
+    conectada, que roda a checagem de novo quando a rede de fato sobe.
 
     O reinicio e deliberadamente conservador - ele derruba sessao ativa:
       - so age se a maquina TEM IPv6 global agora (senao reiniciaria para
