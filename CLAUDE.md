@@ -106,6 +106,9 @@ afetam quem edita este repo:
   `'N'` — é como o próprio RustDesk grava ao religar. Não exija `'N'` literal.
 - **Checar `sc.exe qfailure` por `5000` solto casa `15000`.** Use `(?<!\d)5000(?!\d)`; as
   recovery actions estão duplicadas no watchdog (template isolado) e um teste as mantém iguais.
+- **`Profile` de regra de firewall `Any` vale `0`, não `7`.** Tratar `0` como "nenhum perfil"
+  reprova justamente a regra que o instalador do RustDesk cria. A cobertura está em
+  `Get-RustDeskFirewallCoverage` e duplicada no watchdog; o harness roda os mesmos casos nas duas.
 - **`Get-ScheduledTask` sem elevação devolve vazio** para tarefas de SYSTEM em vez de negar
   acesso — falso negativo silencioso. Tarefas do próprio usuário (como `HerdrServer`) são
   consultáveis sem elevação.

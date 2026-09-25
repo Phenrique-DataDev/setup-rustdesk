@@ -111,6 +111,45 @@ if ($elevated -and $svc) {
           else { 'ausente - o servico foi recriado (ex.: parar/iniciar pela interface). O watchdog reaplica na proxima passada; ou rode Setup.ps1 -Install' })
 }
 
+# --- rede --------------------------------------------------------------
+Write-Host ''
+Write-Host 'Rede' -ForegroundColor Cyan
+
+# Sem regra de entrada, o hole punching e o acesso direto morrem no host e toda
+# sessao cai no relay: mais lenta para abrir, com o atraso ate o servidor de
+# relay em cada quadro. Tudo continua "funcionando", so pior - por isso checar.
+if ($paths.Installed) {
+    try {
+        $fw = Get-RustDeskFirewallState -Exe $paths.Exe
+        $det = if ($fw.Covered) {
+            $ativos = @('Domain', 'Private', 'Public' | Where-Object { $fw.DisabledProfiles -notcontains $_ })
+            "perfis: $($ativos -join ', ')"
+        } else {
+            $p = @()
+            if ($fw.Missing.Count) { $p += "sem regra em: $($fw.Missing -join ', ')" }
+            if ($fw.Blocked.Count) { $p += "regra Block em: $($fw.Blocked -join ', ') (revise na mao)" }
+            ($p -join '; ') + ' - sessoes cairiam no relay. Setup.ps1 -Configure (ou o watchdog) recria a regra'
+        }
+        Test-Item 'firewall libera a entrada do RustDesk' $fw.Covered $det
+    } catch {
+        Test-Item 'firewall libera a entrada do RustDesk' 'aviso' "nao foi possivel ler as regras: $($_.Exception.Message)"
+    }
+}
+
+# Portas efemeras esgotadas: enquanto dura, o RustDesk nao abre o socket de
+# registro nem conexao nova - a maquina parece offline. Nao e defeito do
+# RustDesk, mas e a explicacao mais comum para "nao conectou" sem motivo.
+$esgot = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Tcpip'; Id = 4266, 4231
+                                            StartTime = (Get-Date).AddDays(-7) } -ErrorAction SilentlyContinue)
+if ($esgot.Count -eq 0) {
+    Test-Item 'portas efemeras nao se esgotaram (7 dias)' $true
+} else {
+    $udp = @($esgot | Where-Object Id -eq 4266).Count
+    Test-Item 'portas efemeras nao se esgotaram (7 dias)' 'aviso' `
+        ("$($esgot.Count)x (UDP $udp, TCP $($esgot.Count - $udp)); ultima em $($esgot[0].TimeCreated.ToString('yyyy-MM-dd HH:mm')). " +
+         'Algum programa abre sockets demais - veja Get-PowerDiagnostics.ps1')
+}
+
 # --- configs -----------------------------------------------------------
 Write-Host ''
 Write-Host 'Configuracao' -ForegroundColor Cyan

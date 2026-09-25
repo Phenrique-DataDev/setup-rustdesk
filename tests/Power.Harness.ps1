@@ -634,6 +634,33 @@ It 'recovery: 15000 e 150000 nao passam por 5000' {
     Assert-True (-not (Test-RecoveryConfigured ($qfNossa -replace '= 5000 ms', '= 150000 ms'))) 'casou 150000'
 }
 
+# --- firewall: a lib e a copia do watchdog tem que concordar ----------
+function New-Regra($dir, $acao, $perfil, $ativa = 'True') {
+    [PSCustomObject]@{ Direction = $dir; Action = $acao; Profile = $perfil; Enabled = $ativa }
+}
+$casosFw = @(
+    @{ Nome = 'Any (enum 0) cobre tudo';       Regras = @(New-Regra 'Inbound' 'Allow' 'Any');   Off = @(); Faltando = '';               Bloq = '' },
+    @{ Nome = 'Any como inteiro 0';            Regras = @(New-Regra 'Inbound' 'Allow' 0);       Off = @(); Faltando = '';               Bloq = '' },
+    @{ Nome = 'so Private deixa o Publico';    Regras = @(New-Regra 'Inbound' 'Allow' 'Private'); Off = @(); Faltando = 'Domain,Public'; Bloq = '' },
+    @{ Nome = 'lista com virgula';             Regras = @(New-Regra 'Inbound' 'Allow' 'Domain, Private, Public'); Off = @(); Faltando = ''; Bloq = '' },
+    @{ Nome = 'inteiro 6 = Private+Public';    Regras = @(New-Regra 'Inbound' 'Allow' 6);       Off = @(); Faltando = 'Domain';        Bloq = '' },
+    @{ Nome = 'saida nao conta';               Regras = @(New-Regra 'Outbound' 'Allow' 'Any'); Off = @(); Faltando = 'Domain,Private,Public'; Bloq = '' },
+    @{ Nome = 'regra desativada nao conta';    Regras = @(New-Regra 'Inbound' 'Allow' 'Any' 'False'); Off = @(); Faltando = 'Domain,Private,Public'; Bloq = '' },
+    @{ Nome = 'Block vence Allow';             Regras = @((New-Regra 'Inbound' 'Allow' 'Any'), (New-Regra 'Inbound' 'Block' 'Public')); Off = @(); Faltando = ''; Bloq = 'Public' },
+    @{ Nome = 'perfil com firewall desligado'; Regras = @(New-Regra 'Inbound' 'Allow' 'Private'); Off = @('Domain', 'Public'); Faltando = ''; Bloq = '' },
+    @{ Nome = 'sem regra nenhuma';             Regras = @();                                    Off = @(); Faltando = 'Domain,Private,Public'; Bloq = '' }
+)
+foreach ($c in $casosFw) {
+    It "firewall: $($c.Nome) (lib e watchdog)" {
+        foreach ($f in 'Get-RustDeskFirewallCoverage', 'Get-FirewallCobertura') {
+            $r = & $f -Rules $c.Regras -DisabledProfiles $c.Off
+            Assert-Equal $c.Faltando ($r.Missing -join ',') "$f Missing"
+            Assert-Equal $c.Bloq     ($r.Blocked -join ',') "$f Blocked"
+            Assert-Equal ($c.Faltando -eq '' -and $c.Bloq -eq '') $r.Covered "$f Covered"
+        }
+    }
+}
+
 } finally {
     Remove-Item env:RDHARNESS_LAPTOP -ErrorAction SilentlyContinue
     Remove-Item env:RDHARNESS_ELEVATED -ErrorAction SilentlyContinue
