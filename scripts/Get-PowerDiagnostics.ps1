@@ -219,6 +219,63 @@ if ($wifi.Count -eq 0) {
     }
 }
 
+# --- rede: firewall, portas, quedas -------------------------------------
+# Tres causas de "nao conectou" ou "abriu lento" que nao aparecem no RustDesk:
+# firewall sem regra de entrada (tudo vai para o relay), portas efemeras
+# esgotadas por outro programa (nao abre socket nenhum) e a propria rede caindo.
+Add-Secao "rede - firewall, portas efemeras e quedas (ultimas $Hours h)"
+
+Add-Linha '--- firewall: regras que citam o rustdesk.exe ---'
+if ($paths.Installed) {
+    try {
+        $fw = Get-RustDeskFirewallState -Exe $paths.Exe
+        foreach ($r in $fw.Rules) {
+            Add-Linha ("{0,-24} {1,-9} {2,-6} ativa={3,-6} perfil={4}" -f $r.DisplayName, $r.Direction, $r.Action, $r.Enabled, $r.Profile)
+        }
+        if ($fw.Rules.Count -eq 0) { Add-Linha '(nenhuma regra)' }
+        if ($fw.DisabledProfiles.Count) { Add-Linha "firewall desligado em: $($fw.DisabledProfiles -join ', ')" }
+        Add-Linha $(if ($fw.Covered) { 'cobertura: OK em todos os perfis ativos' }
+                    else { "cobertura: FALTA em [$($fw.Missing -join ', ')], BLOQUEADO em [$($fw.Blocked -join ', ')] - sessoes caem no relay" })
+    } catch { Add-Linha "FALHOU: $($_.Exception.Message)" }
+} else { Add-Linha 'RustDesk nao instalado.' }
+
+Add-Linha ''
+Add-Linha '--- portas efemeras esgotadas (Tcpip 4266 = UDP, 4231 = TCP) ---'
+$esg = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Tcpip'; Id = 4266, 4231; StartTime = $desde } -ErrorAction SilentlyContinue)
+if ($esg.Count -eq 0) { Add-Linha 'nenhum esgotamento na janela.' }
+else {
+    $esg | Sort-Object TimeCreated | ForEach-Object {
+        Add-Linha "$($_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))  $(if ($_.Id -eq 4266) { 'UDP' } else { 'TCP' })"
+    }
+    Add-Linha 'Enquanto dura, o RustDesk nao abre o socket de registro nem conexao nova.'
+    Add-Linha 'O culpado e quem tem mais sockets NO MOMENTO; a lista abaixo e de agora.'
+}
+
+Add-Linha ''
+Add-Linha '--- sockets por processo agora (top 6) ---'
+foreach ($proto in @(
+    @{ Nome = 'TCP'; Dados = @(Get-NetTCPConnection -ErrorAction SilentlyContinue) },
+    @{ Nome = 'UDP'; Dados = @(Get-NetUDPEndpoint   -ErrorAction SilentlyContinue) }
+)) {
+    Add-Linha "$($proto.Nome): $($proto.Dados.Count) no total"
+    $proto.Dados | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object -First 6 | ForEach-Object {
+        $nome = (Get-Process -Id ([int]$_.Name) -ErrorAction SilentlyContinue).ProcessName
+        Add-Linha ("  {0,6}  {1} (pid {2})" -f $_.Count, $(if ($nome) { $nome } else { '?' }), $_.Name)
+    }
+}
+
+Add-Linha ''
+Add-Linha '--- rede desconectada / DNS sem resposta ---'
+$quedasRede = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-NetworkProfile/Operational'; Id = 10001; StartTime = $desde } -ErrorAction SilentlyContinue)
+$dnsTimeout = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-DNS-Client'; Id = 1014; StartTime = $desde } -ErrorAction SilentlyContinue)
+Add-Linha "rede desconectada (NetworkProfile 10001): $($quedasRede.Count)   DNS sem resposta (DNS-Client 1014): $($dnsTimeout.Count)"
+($quedasRede + $dnsTimeout) | Sort-Object TimeCreated | Select-Object -Last 20 | ForEach-Object {
+    $tipo = if ($_.Id -eq 10001) { "rede desconectada: $($_.Properties[0].Value)" } else { 'DNS sem resposta' }
+    Add-Linha "$($_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))  $tipo"
+}
+Add-Linha 'Adaptador virtual (Hyper-V/WSL) tambem gera 10001. DNS sem resposta junto de'
+Add-Linha 'rede desconectada e a rede caindo, nao o servidor de DNS - DNS secundario nao ajuda.'
+
 # --- tarefas -----------------------------------------------------------
 Add-Secao 'tarefas agendadas do setup'
 foreach ($t in @($paths.TaskName, $paths.AwakeTask, 'HerdrServer')) {

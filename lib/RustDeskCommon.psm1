@@ -434,6 +434,90 @@ function New-RustDeskEventTrigger {
     return $t
 }
 
+function Get-RustDeskFirewallCoverage {
+    <#
+    .SYNOPSIS
+        Diz quais perfis de rede deixam o RustDesk receber conexao direta.
+    .DESCRIPTION
+        Funcao pura: recebe as regras (Direction, Action, Enabled, Profile) ja
+        filtradas pelo programa e os perfis em que o firewall esta desligado.
+        Um perfil esta coberto se o firewall dele esta desligado ou se ha regra
+        de entrada Allow ativa nele - e nenhuma Block ativa, que no Windows
+        vence o Allow.
+    .NOTES
+        Profile chega como enum (Any, 'Private, Public'), como inteiro ou como
+        texto disso. Any e 0, nao 7: tratar 0 como "nenhum perfil" reprovaria
+        justamente a regra que o instalador do RustDesk cria.
+        Uma copia desta logica vive no watchdog (template isolado, sem modulo).
+        Power.Harness.ps1 roda os mesmos casos nas duas.
+    #>
+    [CmdletBinding()]
+    param(
+        [object[]]$Rules = @(),
+        [string[]]$DisabledProfiles = @()
+    )
+
+    $bits = @{ Domain = 1; Private = 2; Public = 4 }
+    function ConvertTo-Bits($p) {
+        $s = ([string]$p).Trim()
+        if ($s -match '^\d+$') { $n = [int]$s; if ($n -eq 0) { return 7 }; return ($n -band 7) }
+        if ($s -eq '' -or $s -eq 'Any') { return 7 }
+        $b = 0
+        foreach ($nome in $s -split '\s*,\s*') { if ($bits.ContainsKey($nome)) { $b = $b -bor $bits[$nome] } }
+        return $b
+    }
+
+    $allow = 0; $block = 0
+    foreach ($r in $Rules) {
+        if ([string]$r.Direction -ne 'Inbound' -or [string]$r.Enabled -ne 'True') { continue }
+        if     ([string]$r.Action -eq 'Allow') { $allow = $allow -bor (ConvertTo-Bits $r.Profile) }
+        elseif ([string]$r.Action -eq 'Block') { $block = $block -bor (ConvertTo-Bits $r.Profile) }
+    }
+
+    $faltando = @(); $bloqueados = @()
+    foreach ($nome in 'Domain', 'Private', 'Public') {
+        if ($DisabledProfiles -contains $nome) { continue }
+        if ($block -band $bits[$nome])       { $bloqueados += $nome }
+        elseif (-not ($allow -band $bits[$nome])) { $faltando += $nome }
+    }
+    return [PSCustomObject]@{
+        Covered  = ($faltando.Count -eq 0 -and $bloqueados.Count -eq 0)
+        Missing  = $faltando
+        Blocked  = $bloqueados
+    }
+}
+
+function Get-RustDeskFirewallState {
+    <#
+    .SYNOPSIS
+        Le as regras do firewall que citam o executavel do RustDesk e avalia a cobertura.
+    .DESCRIPTION
+        Sem regra de entrada, o hole punching TCP e o acesso direto na LAN
+        morrem no firewall do host, e toda sessao cai no relay publico - mais
+        lenta para abrir e com o atraso de ida e volta ate o servidor de relay
+        somado a cada quadro. O instalador .exe cria 'RustDesk Service'; nada
+        garante que o .msi, uma politica ou um antivirus a mantenham.
+    .NOTES
+        ActiveStore: e o que vale de fato, inclusive regras de GPO. Nao exige
+        elevacao. O Program das regras pode vir com variavel de ambiente.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Exe)
+
+    $alvo    = [IO.Path]::GetFullPath($Exe)
+    $filtros = @(Get-NetFirewallApplicationFilter -PolicyStore ActiveStore -ErrorAction Stop |
+                 Where-Object { $_.Program -and
+                     [Environment]::ExpandEnvironmentVariables($_.Program) -ieq $alvo })
+    $regras  = @($filtros | Get-NetFirewallRule -ErrorAction SilentlyContinue)
+    $off     = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
+                 Where-Object { [string]$_.Enabled -eq 'False' } | ForEach-Object { [string]$_.Name })
+
+    $c = Get-RustDeskFirewallCoverage -Rules $regras -DisabledProfiles $off
+    $c | Add-Member -NotePropertyName Rules -NotePropertyValue $regras
+    $c | Add-Member -NotePropertyName DisabledProfiles -NotePropertyValue $off
+    return $c
+}
+
 function Stop-RustDeskClean {
     <#
     .SYNOPSIS
@@ -547,4 +631,5 @@ Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI,
                               Test-IsLaptop, Get-BatteryPercent, Test-RemoteSessionActive,
                               Get-LastResumeTime, Get-PowerEpochStamp, New-RustDeskResumeTrigger,
-                              New-RustDeskNetworkTrigger, New-RustDeskEventTrigger
+                              New-RustDeskNetworkTrigger, New-RustDeskEventTrigger,
+                              Get-RustDeskFirewallCoverage, Get-RustDeskFirewallState

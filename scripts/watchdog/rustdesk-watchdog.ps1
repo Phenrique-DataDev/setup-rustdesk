@@ -11,7 +11,13 @@
       4. o StartType e Automatic;
       5. as recovery actions do SCM existem (reinicio automatico apos falha);
       6. nenhuma das configs tem stop-service = 'Y';
-      7. o servico enxerga o IPv6 (so quando a maquina tem IPv6 global).
+      7. o servico enxerga o IPv6 (so quando a maquina tem IPv6 global);
+      8. o firewall deixa o RustDesk receber conexao em todos os perfis.
+
+    O item 8 existe porque, sem regra de entrada, o hole punching e o acesso
+    direto morrem no host e toda sessao cai no relay publico: mais segundos
+    para abrir e o atraso ate o servidor de relay somado a cada quadro. O
+    perfil Publico conta - e nele que um notebook fica num Wi-Fi de fora.
 
     O item 5 existe porque o servico e recriado do zero mais vezes do que
     parece. "Parar servico" na interface do RustDesk faz sc delete, e "Iniciar
@@ -96,6 +102,40 @@ function Test-RecoveryConfigured {
     # 150000, que sao atrasos de outro servico, e aprovaria o errado.
     param([string]$Saida)
     return [bool]($Saida -match '(?<!\d)5000(?!\d)')
+}
+
+function Get-FirewallCobertura {
+    # Copia de Get-RustDeskFirewallCoverage (lib/RustDeskCommon.psm1): este
+    # template roda sem o modulo. Power.Harness.ps1 roda os mesmos casos nas
+    # duas. Profile Any vale 0 - nao e "nenhum perfil".
+    param([object[]]$Rules = @(), [string[]]$DisabledProfiles = @())
+    $bits = @{ Domain = 1; Private = 2; Public = 4 }
+    $conv = {
+        param($p)
+        $s = ([string]$p).Trim()
+        if ($s -match '^\d+$') { $n = [int]$s; if ($n -eq 0) { return 7 }; return ($n -band 7) }
+        if ($s -eq '' -or $s -eq 'Any') { return 7 }
+        $b = 0
+        foreach ($nome in $s -split '\s*,\s*') { if ($bits.ContainsKey($nome)) { $b = $b -bor $bits[$nome] } }
+        return $b
+    }
+    $allow = 0; $block = 0
+    foreach ($r in $Rules) {
+        if ([string]$r.Direction -ne 'Inbound' -or [string]$r.Enabled -ne 'True') { continue }
+        if     ([string]$r.Action -eq 'Allow') { $allow = $allow -bor (& $conv $r.Profile) }
+        elseif ([string]$r.Action -eq 'Block') { $block = $block -bor (& $conv $r.Profile) }
+    }
+    $faltando = @(); $bloqueados = @()
+    foreach ($nome in 'Domain', 'Private', 'Public') {
+        if ($DisabledProfiles -contains $nome) { continue }
+        if ($block -band $bits[$nome])            { $bloqueados += $nome }
+        elseif (-not ($allow -band $bits[$nome])) { $faltando += $nome }
+    }
+    return [PSCustomObject]@{
+        Covered = ($faltando.Count -eq 0 -and $bloqueados.Count -eq 0)
+        Missing = $faltando
+        Blocked = $bloqueados
+    }
 }
 
 function Get-EpochStamp {
@@ -245,6 +285,30 @@ if ($svcLogDir -and (Test-Path $svcLogDir)) {
             }
         }
     }
+}
+
+# --- 8. regra de entrada no firewall ----------------------------------
+# Ver o cabecalho. So recria o que falta; regra Block e decisao de alguem e
+# fica, com aviso. Falha na consulta nao derruba o resto do watchdog.
+try {
+    $alvo    = [IO.Path]::GetFullPath($exe)
+    $regras  = @(Get-NetFirewallApplicationFilter -PolicyStore ActiveStore -ErrorAction Stop |
+                 Where-Object { $_.Program -and [Environment]::ExpandEnvironmentVariables($_.Program) -ieq $alvo } |
+                 Get-NetFirewallRule -ErrorAction SilentlyContinue)
+    $off     = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
+                 Where-Object { [string]$_.Enabled -eq 'False' } | ForEach-Object { [string]$_.Name })
+    $fw = Get-FirewallCobertura -Rules $regras -DisabledProfiles $off
+    if ($fw.Blocked.Count -gt 0) {
+        Write-Log "AVISO: regra Block ativa para o RustDesk em $($fw.Blocked -join ', '). Conexao direta bloqueada; nao removida."
+    }
+    if ($fw.Missing.Count -gt 0) {
+        Write-Log "AVISO: sem regra de entrada para o RustDesk em $($fw.Missing -join ', '). Toda sessao cairia no relay. Recriando."
+        New-NetFirewallRule -DisplayName 'RustDesk Service' -Direction Inbound -Action Allow `
+            -Program $exe -Profile Any -Enabled True -ErrorAction Stop | Out-Null
+        Write-Log 'Regra de entrada do firewall recriada.'
+    }
+} catch {
+    Write-Log "ERRO ao checar o firewall: $($_.Exception.Message)"
 }
 
 $svc    = Get-Service -Name rustdesk -ErrorAction SilentlyContinue

@@ -222,6 +222,58 @@ corrige (veja acima). Não depende do roteador.
 Fora isso, resta hospedar `hbbs`/`hbbr` próprios, o que também tiraria o `rs-ny` — a
 ~188 ms daqui.
 
+#### O firewall do host decide se existe P2P
+
+Tudo acima pressupõe que a conexão consegue **entrar** no host. O TCP punch e o acesso direto
+dependem de uma regra de entrada liberando o `rustdesk.exe`. Sem ela, nada dá erro: o P2P morre
+em silêncio no firewall e **toda** sessão cai no relay. Ela passa a demorar mais para abrir e
+leva o atraso de ida e volta até o servidor de relay em cada quadro.
+
+O instalador `.exe` cria a regra `RustDesk Service`. Nada garante que o `.msi`, uma política
+ou um antivírus a mantenham. E ela precisa valer também no perfil **Público**, que é onde um
+notebook fica num Wi-Fi de fora. Por isso:
+
+- a verificação exige entrada liberada em todos os perfis em que o firewall está ligado;
+- `-Configure` cria a regra que faltar, com o mesmo nome da do instalador, para a
+  desinstalação do RustDesk removê-la junto;
+- o watchdog a recria se ela sumir.
+
+Uma regra **Block** para o RustDesk vence qualquer Allow. Ela é apontada na verificação e no
+`watchdog.log`, mas não é removida: alguém a colocou lá.
+
+### Fluidez durante a sessão: o que depende de quem e do quê
+
+Com a sessão aberta, a qualidade é ajustada sozinha. O host mede o atraso a cada poucos
+segundos e, **acima de 150 ms**, baixa quadros por segundo e taxa de bits até o atraso voltar.
+Isso é o controle automático de taxa (`enable-abr`), ligado por padrão. Também já vêm ligados
+por padrão a codificação por hardware (`enable-hwcodec`) e a opção de manter a máquina
+acordada durante sessões recebidas. O repositório não mexe nessas opções porque o padrão já é
+o melhor valor.
+
+O resto é escolhido por **quem conecta**, na barra da sessão, e não pela config do host:
+
+| Onde | O quê | Para estabilidade |
+|---|---|---|
+| Qualidade da imagem | *Boa qualidade de imagem* / *Balanceada* / *Otimizar tempo de resposta* | *Balanceada* segura melhor em rede instável; *Otimizar tempo de resposta* sacrifica nitidez |
+| Codec | *Automático* / VP8 / VP9 / AV1 / H.264 / H.265 | *Automático*: negocia o de hardware quando os dois lados têm |
+| Monitor de qualidade | *Exibir monitor de qualidade* | Mostra atraso, FPS e taxa ao vivo — é como saber se o gargalo é a rede |
+
+Duas causas de sessão "travando" que nenhuma opção do RustDesk resolve, e que a verificação
+e o diagnóstico passam a mostrar:
+
+- **Upload saturado no host.** A imagem sai pelo upload da máquina acessada. Um cliente de
+  torrent, um backup ou uma sincronização de nuvem enchendo o upload fazem o atraso passar de
+  150 ms, e o controle de taxa derruba a qualidade da sessão. Nesse caso, limite o upload do
+  outro programa; o RustDesk não tem como passar na frente dele.
+- **Portas efêmeras esgotadas.** Quando algum programa ocupa as ~16 mil portas dinâmicas, o
+  Windows registra `Tcpip` 4266 (UDP) ou 4231 (TCP). Enquanto dura, o RustDesk não abre o
+  socket de registro nem conexão nova, e a máquina parece offline. A verificação avisa se
+  isso aconteceu nos últimos 7 dias. O culpado é quem tinha mais sockets **naquele
+  momento**, e o diagnóstico lista os maiores de agora.
+
+Um DNS secundário não ajuda nos casos observados: as falhas de DNS nos logs coincidiam com a
+rede inteira caindo (`NetworkProfile` 10001), não com o servidor de DNS parado.
+
 ### Versão fixada e atualizações desligadas
 
 A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.4.9` (última estável em
@@ -295,6 +347,7 @@ C:\ProgramData\RustDesk\
   awake.log                          transições do bloqueio de suspensão
 Tarefa "RustDeskWatchdog"            SYSTEM, no boot, a cada 10 min, ao acordar e ao conectar na rede
 Tarefa "RustDeskAwake"               SYSTEM, só em notebook, sem limite de duração
+Firewall "RustDesk Service"          entrada liberada ao rustdesk.exe em todos os perfis (se faltar)
 
 %LOCALAPPDATA%\Programs\Herdr\       binário (instalador oficial do herdr.dev)
 %APPDATA%\herdr\config.toml          config aplicada de config/herdr*.psd1
@@ -305,7 +358,8 @@ Tarefa "HerdrServer"                 usuário, no logon, sem limite de duração
 Duas camadas de proteção, de propósito: as **recovery actions do SCM** cobrem quedas do
 serviço em segundos; o **watchdog** cobre o que o SCM não vê — serviço desinstalado,
 desabilitado, **sem as próprias recovery actions**, `stop-service = 'Y'` na config (que deixa
-o acesso remoto morto com todos os indicadores verdes), ou o serviço **sem IPv6**.
+o acesso remoto morto com todos os indicadores verdes), o serviço **sem IPv6**, ou o
+firewall **sem regra de entrada** (que manda toda sessão para o relay).
 
 O caso do IPv6 é uma corrida no boot: o serviço é `AUTO_START` e sobe antes de a rede ficar
 pronta. O log mostra o motivo — `Failed to bind IPv6 socket ... (os error 11001)`, que é
@@ -448,6 +502,12 @@ do Wi-Fi na janela, com o motivo (`WLAN-AutoConfig` 8001/8003). É só relatóri
 dessas propriedades mudam por fabricante e são traduzidos, então ajustá-las é decisão
 manual, uma por vez, medindo antes e depois. O arquivo contém o SSID; ele é local e não deve
 ir para o repositório.
+
+Há também uma seção de **rede**, em qualquer máquina: as regras de firewall que citam o
+`rustdesk.exe`, cada esgotamento de portas efêmeras (`Tcpip` 4266/4231) na janela, os
+processos com mais sockets naquele momento, e cada queda de rede (`NetworkProfile` 10001)
+junto das falhas de DNS (`DNS-Client` 1014) — ver
+[Fluidez durante a sessão](#fluidez-durante-a-sessão-o-que-depende-de-quem-e-do-quê).
 
 ```powershell
 .\scripts\Get-PowerDiagnostics.ps1        # somente leitura; eleve para incluir o log do serviço

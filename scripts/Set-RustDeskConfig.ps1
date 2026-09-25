@@ -13,6 +13,9 @@
     O servico e parado antes da edicao: com ele no ar, o arquivo pode ser
     regravado por cima ao sair.
 
+    Por fim garante a regra de entrada do firewall para o rustdesk.exe em
+    todos os perfis - sem ela toda sessao cai no relay.
+
 .NOTES
     Exige Administrador.
 #>
@@ -123,6 +126,34 @@ if ($simulando) {
     $log += Start-RustDeskUI
 } else {
     $log += 'AVISO: -NoRestart usado. O servico so aplica as mudancas apos reiniciar.'
+}
+
+# --- firewall: entrada liberada em todos os perfis ---------------------
+# Sem ela o hole punching e o acesso direto na LAN morrem no host e toda
+# sessao cai no relay. O perfil Publico importa: e nele que um notebook fica
+# num Wi-Fi de fora. O nome e o mesmo que o instalador do RustDesk usa, para a
+# desinstalacao dele (netsh ... delete rule name="RustDesk Service") limpar
+# tambem a regra criada aqui. Regra Block nao e removida: alguem a pos la.
+$log += '--- firewall (entrada do RustDesk) ---'
+$fw = Get-RustDeskFirewallState -Exe $paths.Exe
+if ($fw.Covered) {
+    $log += '  [OK] entrada liberada em todos os perfis ativos'
+} else {
+    if ($fw.Blocked.Count -gt 0) {
+        $log += "  AVISO: regra Block ativa para o RustDesk em: $($fw.Blocked -join ', '). Nao removida - revise na mao."
+    }
+    if ($fw.Missing.Count -gt 0) {
+        if ($PSCmdlet.ShouldProcess($paths.Exe, "criar regra de entrada 'RustDesk Service' (perfis sem cobertura: $($fw.Missing -join ', '))")) {
+            New-NetFirewallRule -DisplayName 'RustDesk Service' -Direction Inbound -Action Allow `
+                -Program $paths.Exe -Profile Any -Enabled True -ErrorAction Stop | Out-Null
+            # Reconsultar em vez de anunciar.
+            $depois = Get-RustDeskFirewallState -Exe $paths.Exe
+            if ($depois.Missing.Count -eq 0) { $log += "  [APLICADO] regra de entrada criada (faltava em: $($fw.Missing -join ', '))" }
+            else { throw "regra de entrada criada, mas continuam sem cobertura: $($depois.Missing -join ', ')" }
+        } else {
+            $log += "  [SIMULACAO] criaria regra de entrada 'RustDesk Service' (faltava em: $($fw.Missing -join ', '))"
+        }
+    }
 }
 
 $log | ForEach-Object { Write-Host "  $_" }
