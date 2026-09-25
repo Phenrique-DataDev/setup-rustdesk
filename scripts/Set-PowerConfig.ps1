@@ -84,12 +84,18 @@ function Read-PowerIndex {
         entao procurar por 'Current AC Power Setting Index' daria falso negativo
         em pt-BR - mesma familia de armadilha do IsInRole com string. O que nao
         muda e o formato do valor: os indices saem como 0x00000000 e sao os
-        unicos campos nesse formato na saida de /q de um setting. As duas
+        unicos campos nesse formato na saida de /qh de um setting. As duas
         ultimas ocorrencias sao, nesta ordem, AC e DC.
+
+        /qh, e nao /q: o /q omite settings com atributo de oculto, e num
+        notebook com Modern Standby a tampa e a conectividade em espera vem
+        ocultas. Com /q o passo reportava 'o plano nao expoe' e pulava uma
+        opcao que existia. Os indices de enum do /qh ('000 Desabilitar') nao
+        usam o formato 0x, entao a regra das duas ultimas ocorrencias vale.
     #>
     param([string]$Sub, [string]$Setting)
 
-    $saida = (& powercfg /q SCHEME_CURRENT $Sub $Setting 2>&1 | Out-String)
+    $saida = (& powercfg /qh SCHEME_CURRENT $Sub $Setting 2>&1 | Out-String)
     $m = [regex]::Matches($saida, '0x[0-9A-Fa-f]{8}')
     if ($m.Count -lt 2) { return $null }
     return [PSCustomObject]@{
@@ -104,8 +110,8 @@ $aplicar = @(
     @{ Sub = 'SUB_SLEEP';   Setting = 'HIBERNATEIDLE'; Ac = 'HibernateIdleAC'; Dc = 'HibernateIdleDC'; Rotulo = 'hibernar por ociosidade (s)' },
     @{ Sub = 'SUB_VIDEO';   Setting = 'VIDEOIDLE';     Ac = 'VideoIdleAC';     Dc = 'VideoIdleDC';     Rotulo = 'desligar o painel (s)' },
     # O subgrupo do adaptador sem fio nao tem alias no powercfg: so GUID.
-    # Sem Wi-Fi, ou com a opcao oculta pelo Modern Standby, o /q nao devolve
-    # indice e o item vira [PULADO] no laco abaixo.
+    # Sem Wi-Fi o /qh nao devolve indice e o item vira [PULADO] no laco
+    # abaixo. Oculta pelo Modern Standby ela ainda aparece no /qh.
     @{ Sub = '19CBB8FA-5279-450E-9FAC-8A3D5FEDD0C1'; Setting = '12BBEBE6-58D6-4636-95BB-3217EF867C1A'
        Ac = 'WirelessPowerSavingAC'; Dc = 'WirelessPowerSavingDC'; Rotulo = 'economia de energia do Wi-Fi' }
 )
@@ -184,8 +190,20 @@ if (-not $simulando) {
 # --- 6) adaptador de rede ---------------------------------------------
 # 'Permitir que o computador desligue este dispositivo' e a causa classica de
 # voltar da suspensao com a rede fora do ar por minutos.
-$mexerNic = (-not $NoNic) -and ((Get-Opt 'DisableNicPowerSaving') -eq $true)
-if (-not $mexerNic) {
+#
+# Este passo SO LE. Ate 2026-09 ele chamava Disable-NetAdapterPowerManagement,
+# e num notebook real (MediaTek MT7925, Modern Standby) isso se mostrou errado
+# em tres pontos:
+#   - o cmdlet nao controla AllowComputerToTurnOffDevice (nem
+#     Set-NetAdapterPowerManagement tem esse parametro), entao o bit nao mudava
+#     e o log dizia [APLICADO];
+#   - desligava por tabela o Wake on Magic Packet;
+#   - reiniciava o adaptador, derrubando o Wi-Fi por ~5 s - e, como a guarda
+#     nunca passava, a cada -All. Rodando remoto pelo Wi-Fi, a sessao caia.
+# O ajuste fica manual (Gerenciador de Dispositivos) ate haver um caminho
+# testado num notebook - ver BACKLOG.md.
+$olharNic = (-not $NoNic) -and ((Get-Opt 'DisableNicPowerSaving') -eq $true)
+if (-not $olharNic) {
     $log += '[PULADO] gerenciamento de energia do adaptador: desligado no .psd1 ou -NoNic'
 } else {
     $nics = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })
@@ -197,26 +215,11 @@ if (-not $mexerNic) {
             $log += "[PULADO] $($nic.Name): o driver nao expoe gerenciamento de energia"
             continue
         }
-        # Estado anterior no log: e o que permite desfazer na mao depois.
-        $log += "$($nic.Name): antes -> DeviceSleepOnDisconnect=$($pm.DeviceSleepOnDisconnect), WakeOnMagicPacket=$($pm.WakeOnMagicPacket)"
-
-        # Sem esta guarda o script reescreve o adaptador a cada execucao e
-        # reporta [APLICADO] sem ter mudado nada - escrita em hardware de graca
-        # toda vez que o -All roda, e uma saida que mente.
         if ($pm.AllowComputerToTurnOffDevice -eq 'Disabled') {
-            $log += "[OK] $($nic.Name): o Windows ja nao desliga este adaptador"
-            continue
-        }
-
-        if (-not $PSCmdlet.ShouldProcess($nic.Name, 'desligar o power saving do adaptador')) {
-            $log += "[SIMULACAO] $($nic.Name): desligaria o power saving do adaptador"
-            continue
-        }
-        try {
-            Disable-NetAdapterPowerManagement -Name $nic.Name -Confirm:$false -ErrorAction Stop
-            $log += "[APLICADO] $($nic.Name): power saving do adaptador desligado"
-        } catch {
-            $falhas += "$($nic.Name): nao foi possivel desligar o power saving - $($_.Exception.Message)"
+            $log += "[OK] $($nic.Name): o Windows nao desliga este adaptador"
+        } else {
+            $log += "[AVISO] $($nic.Name): o Windows ainda pode desligar o adaptador (AllowComputerToTurnOffDevice=$($pm.AllowComputerToTurnOffDevice))"
+            $log += "        nao ha cmdlet que mude isto; desmarque em Gerenciador de Dispositivos > $($nic.InterfaceDescription) > Gerenciamento de Energia, se a aba existir"
         }
     }
 }
@@ -224,7 +227,7 @@ if (-not $mexerNic) {
 # --- 7) resumo ---------------------------------------------------------
 if ($simulando) {
     $log += ''
-    $log += 'Simulacao: nada foi gravado. Confira com "powercfg /q SCHEME_CURRENT SUB_BUTTONS".'
+    $log += 'Simulacao: nada foi gravado. Confira com "powercfg /qh SCHEME_CURRENT SUB_BUTTONS".'
 }
 if ($falhas.Count -gt 0) {
     $log += ''

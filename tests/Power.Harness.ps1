@@ -105,9 +105,14 @@ Import-Module $mod -Force
 # =====================================================================
 $global:plano = @{}; $global:chamadas = @(); $global:ativado = $false
 $global:temS0 = $false; $global:escritaFajuta = $false; $global:nicDesligado = $false
+$global:ocultos = @()
 
 function Reset-Plano {
-    param([bool]$ComS0 = $false, [bool]$ComTampa = $true, [bool]$Fajuta = $false, [bool]$ComWifi = $true)
+    # -Ocultos: chaves 'SUB/SETTING' com atributo de oculto - o /q as omite e
+    # so o /qh as devolve. Foi o que a tampa e a conectividade em espera
+    # fizeram num notebook real com Modern Standby.
+    param([bool]$ComS0 = $false, [bool]$ComTampa = $true, [bool]$Fajuta = $false, [bool]$ComWifi = $true,
+          [string[]]$Ocultos = @())
     $global:plano = @{
         'SUB_BUTTONS/LIDACTION'   = @{ Ac = 1;     Dc = 1 }
         'SUB_SLEEP/STANDBYIDLE'   = @{ Ac = 1800;  Dc = 900 }
@@ -121,6 +126,7 @@ function Reset-Plano {
     if (-not $ComTampa) { $global:plano.Remove('SUB_BUTTONS/LIDACTION') }
     $global:chamadas = @(); $global:ativado = $false
     $global:temS0 = $ComS0; $global:escritaFajuta = $Fajuta
+    $global:ocultos = $Ocultos
 }
 
 function powercfg {
@@ -140,9 +146,10 @@ function powercfg {
             return @('Os seguintes estados de suspensao estao disponiveis neste sistema:',
                      '    Espera (S3)', '    Hibernar')
         }
-        '^/q$' {
+        '^/qh?$' {
             $chave = "$($a[2])/$($a[3])"
-            if (-not $global:plano.ContainsKey($chave)) {
+            $escondido = ($a[0] -eq '/q') -and ($global:ocultos -contains $chave)
+            if ($escondido -or -not $global:plano.ContainsKey($chave)) {
                 # subvalor nao exposto: so o cabecalho, sem nenhum 0x. Foi o que
                 # PBUTTONACTION e LIDACTION fizeram na maquina de referencia.
                 return @('GUID do Esquema de Energia: 8c5e7fda-...  (Alto desempenho)',
@@ -310,14 +317,33 @@ It 'powercfg que aceita e ignora a escrita e pego pela releitura' {
     Assert-True ($erro -match 'nao ficaram com o valor pedido') "mensagem inesperada: $erro"
 }
 
-It 'o adaptador e desligado uma vez e reconhecido como ja feito depois' {
-    Reset-Plano; $global:nicDesligado = $false
-    Invoke-SetPower | Out-Null
-    Assert-True (Test-Chamou 'Disable-NetAdapterPowerManagement') 'nao desligou o power saving'
-    $global:chamadas = @()
+It 'setting oculto (so no /qh) e lido e aplicado, nao pulado' {
+    # Regressao: com /q a tampa e a conectividade em espera viravam [PULADO]
+    # 'o plano nao expoe' num notebook real, onde estavam so ocultas.
+    $kConn = 'SUB_NONE/F15576E8-98B7-4186-B944-EAFA664402D9'
+    Reset-Plano -ComS0 $true -Ocultos @($kConn, 'SUB_BUTTONS/LIDACTION')
     $saida = Invoke-SetPower
-    Assert-True (-not (Test-Chamou 'Disable-NetAdapter')) 'desligou de novo o que ja estava desligado'
-    Assert-True ($saida -match 'antes ->') 'nao registrou o estado anterior do adaptador'
+    Assert-Equal 1 $global:plano[$kConn].Ac 'conectividade AC'
+    Assert-Equal 1 $global:plano[$kConn].Dc 'conectividade DC'
+    Assert-Equal 0 $global:plano['SUB_BUTTONS/LIDACTION'].Ac 'tampa AC'
+    Assert-True ($saida -notmatch 'PULADO.*(conectividade|tampa)') 'pulou um setting que so estava oculto'
+}
+
+It 'o passo do adaptador so le: nunca grava e nao anuncia APLICADO' {
+    # Regressao: Disable-NetAdapterPowerManagement nao controla
+    # AllowComputerToTurnOffDevice. O bit nao mudava, a saida dizia
+    # [APLICADO], o Wake on Magic Packet caia por tabela e o Wi-Fi reiniciava a
+    # cada -All.
+    Reset-Plano; $global:nicDesligado = $false
+    $saida = Invoke-SetPower
+    Assert-True (-not (Test-Chamou 'Disable-NetAdapter')) 'gravou no adaptador'
+    Assert-True ($saida -match 'AVISO\] Wi-Fi: o Windows ainda pode desligar') 'nao avisou do estado real'
+    Assert-True ($saida -notmatch 'APLICADO\] Wi-Fi') 'anunciou APLICADO no adaptador'
+
+    Reset-Plano; $global:nicDesligado = $true
+    $saida = Invoke-SetPower
+    Assert-True ($saida -match 'OK\] Wi-Fi: o Windows nao desliga') 'nao reconheceu o estado bom'
+    $global:nicDesligado = $false
 }
 
 It '-NoNic nao encosta no adaptador' {
@@ -472,7 +498,10 @@ It 'o trigger de resume vira XML de subscription valido' {
     $xml = [xml]$t.Subscription
     Assert-True ($null -ne $xml.QueryList) 'XML sem QueryList'
     Assert-True ($t.Subscription -match 'Power-Troubleshooter') 'provider errado'
-    Assert-True ($t.Subscription -match 'EventID=1') 'id de evento errado'
+    Assert-True ($t.Subscription -match 'EventID=1\b') 'id de evento errado'
+    # sem o 507 o trigger nunca dispara num notebook com Modern Standby
+    Assert-True ($t.Subscription -match "Kernel-Power'\] and EventID=507") 'falta a saida da espera moderna (507)'
+    Assert-Equal 2 @($xml.QueryList.Query.Select).Count 'esperados dois Select na mesma Query'
 }
 
 It 'o trigger de rede vira XML de subscription valido' {
@@ -581,6 +610,58 @@ It 'a epoca e estavel entre chamadas seguidas' {
     # se oscilasse, a guarda "uma vez por epoca" nunca seguraria nada
     Assert-Equal (Get-EpochStamp) (Get-EpochStamp) 'o carimbo mudou sem nada acontecer'
 }
+
+# Eventos de energia falsos. Get-WinEvent definido no escopo do It sombreia o
+# cmdlet para a funcao do template (escopo dinamico); para a da lib, o stub e
+# definido dentro do proprio modulo.
+$global:eventosFalsos = @{}
+$stubWinEvent = {
+    function Get-WinEvent {
+        param($FilterHashtable, $MaxEvents, $ErrorAction)
+        $k = "$($FilterHashtable.ProviderName)/$($FilterHashtable.Id)"
+        if (-not $global:eventosFalsos.ContainsKey($k)) { throw 'No events were found that match the specified selection criteria.' }
+        return [PSCustomObject]@{ TimeCreated = $global:eventosFalsos[$k] }
+    }
+}
+$casosResume = @(
+    @{ Nome = 'so espera moderna recente, 107 antigo'; Vazio = $false
+       Ev = @{ 'Microsoft-Windows-Kernel-Power/107' = [datetime]'2026-09-16 18:01:48'
+               'Microsoft-Windows-Kernel-Power/507' = [datetime]'2026-09-25 13:40:27' } },
+    @{ Nome = 'S3 mais recente que a espera moderna'; Vazio = $false
+       Ev = @{ 'Microsoft-Windows-Kernel-Power/107' = [datetime]'2026-09-25 14:00:00'
+               'Microsoft-Windows-Power-Troubleshooter/1' = [datetime]'2026-09-25 14:00:01'
+               'Microsoft-Windows-Kernel-Power/507' = [datetime]'2026-09-20 09:00:00' } },
+    @{ Nome = 'nunca suspendeu'; Vazio = $true; Ev = @{} }
+)
+$modCommon = Get-Module RustDeskCommon
+foreach ($c in $casosResume) {
+    It "ultimo resume: $($c.Nome) (lib e watchdog)" {
+        $global:eventosFalsos = $c.Ev
+        . $stubWinEvent
+        $tplR = Get-LastResume
+        # scriptblock literal passado a '& $modulo' roda DENTRO do modulo; um
+        # . $stubWinEvent ali definiria o stub no escopo do harness, nao no dele
+        $libR = & $modCommon {
+            function Get-WinEvent {
+                param($FilterHashtable, $MaxEvents, $ErrorAction)
+                $k = "$($FilterHashtable.ProviderName)/$($FilterHashtable.Id)"
+                if (-not $global:eventosFalsos.ContainsKey($k)) { throw 'No events were found that match the specified selection criteria.' }
+                return [PSCustomObject]@{ TimeCreated = $global:eventosFalsos[$k] }
+            }
+            Get-LastResumeTime
+        }
+        if ($c.Vazio) {
+            Assert-True ($null -eq $tplR) "watchdog devolveu $tplR"
+            Assert-True ($null -eq $libR) "lib devolveu $libR"
+        } else {
+            # vale o mais recente entre as fontes, nao a primeira que responde
+            $alvo = $c.Ev.Values | Sort-Object | Select-Object -Last 1
+            Assert-Equal $alvo $tplR 'watchdog escolheu o evento errado'
+            Assert-Equal $alvo $libR 'lib escolheu o evento errado'
+        }
+    }
+}
+$global:eventosFalsos = @{}
 
 It 'boot igual e resume novo produzem epocas diferentes' {
     # e a regressao que a correcao existe para evitar: com o carimbo antigo, so

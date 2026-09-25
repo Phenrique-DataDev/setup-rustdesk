@@ -60,9 +60,35 @@ Ainda assim, o essencial continua sem prova, e só um notebook fecha:
 | Fechar a tampa e continuar alcançável | O teste que dá sentido ao resto. |
 | O trigger de resume **disparando** | O objeto é montado e aceito; que o Agendador o acione ao acordar, não foi visto. |
 | O carimbo de época destravando após suspensão real | A lógica de comparação foi testada; o resume real, não. |
-| `Disable-NetAdapterPowerManagement` no hardware | Só o stub e o `-WhatIf` foram cobertos. |
+| ~~`Disable-NetAdapterPowerManagement` no hardware~~ | Rodou em 2026-09-25 e **não fazia o que se pretendia** — o passo virou somente leitura. |
 | A economia de energia do Wi-Fi gravada pelo `powercfg` real | Entrou em 2026-09-25. Leitura conferida na máquina de referência; escrita só no stub. Em Modern Standby a opção pode estar oculta — aí o esperado é `[PULADO]`, e o relatório precisa mostrar qual dos dois aconteceu. |
 | O trigger de rede **disparando** numa troca de Wi-Fi | Entrou em 2026-09-25. A consulta casa com os eventos reais da máquina de referência (cabo); no Wi-Fi, o que tem que aparecer no `watchdog.log` é uma passada ~30 s depois de associar, e o reparo de IPv6 nela se o serviço subiu sem DNS. |
+
+**Revisado em 2026-09-25 — chegou o primeiro relatório de notebook** (Dell, Wi-Fi MediaTek
+MT7925, Modern Standby, `-All` com 0 falhas). Ele derrubou três suposições, corrigidas no
+mesmo dia:
+
+| Suposição | O que o notebook mostrou | Correção |
+|---|---|---|
+| Opção ausente no `powercfg /q` = não existe | A tampa e a conectividade em espera estavam **ocultas**, não ausentes; o `/q` omite settings ocultos | Leitura por `/qh` no setup, na verificação e no diagnóstico |
+| `Disable-NetAdapterPowerManagement` desliga o "permitir desligar" | O bit não mudou; o WoL caiu por tabela; o Wi-Fi reiniciava a cada `-All` | O passo só lê e avisa |
+| Acordar = `Power-Troubleshooter 1` | Último 107 tinha 9 dias; havia dezenas de `Kernel-Power 507` por dia | 507 no trigger e no "último resume" |
+
+Continua em aberto, agora com dado real:
+
+- **A conectividade em espera funciona quando aplicada?** Com o `/qh` ela passa a ser gravada.
+  Conferir depois `powercfg /a`: se "S0 conectado via rede" continuar indisponível, o firmware
+  ou o driver não suportam, e a máquina segue inalcançável enquanto dorme.
+- **A espera moderna na tomada.** O relatório mostra espera das 11:49 às 13:40 com
+  `StandbyIdleAC=0`. Em Modern Standby, apagar o painel pode levar à espera mesmo com
+  suspensão "nunca", e o daemon não segura o painel. Conferir o motivo do `506` e se a
+  máquina estava na tomada.
+- **O "permitir desligar" do adaptador.** `PnPCapabilities = 24` é o caminho conhecido, mas
+  exige reiniciar o adaptador e nunca rodou numa máquina com espera moderna.
+- **O Wi-Fi leva de 70 a 200 s para voltar da espera**, com quedas "pelo driver". Driver
+  5.7.0.5115; vale testar um mais novo antes de mexer em propriedade.
+- Reinstalar `-Watchdog` e `-Power` no notebook para o trigger do 507 entrar, e ver no
+  `watchdog.log` uma passada logo depois de sair da espera.
 
 **Próximo passo — combinado em 2026-08-21:** este item recebe um **relatório da execução num
 notebook**. A ordem é: `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar (linha de

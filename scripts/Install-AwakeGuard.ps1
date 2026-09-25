@@ -126,7 +126,7 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
 $triggers = @(New-ScheduledTaskTrigger -AtStartup)
 try {
     $triggers += New-RustDeskResumeTrigger -DelaySeconds 10
-    $log += 'trigger de resume adicionado (Power-Troubleshooter 1)'
+    $log += 'trigger de resume adicionado (Power-Troubleshooter 1 e Kernel-Power 507)'
 } catch {
     $log += "AVISO: nao foi possivel criar o trigger de resume: $($_.Exception.Message)"
     $log += '  O daemon ainda sobe no boot; so nao reinicia sozinho depois de uma suspensao.'

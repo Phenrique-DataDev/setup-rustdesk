@@ -306,7 +306,10 @@ if ($task) {
 if ($task) {
     $eventos = @($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskEventTrigger' })
     foreach ($gat in @(
-        @{ Rotulo = 'trigger de resume (acorda -> verifica)'; Provider = 'Power-Troubleshooter'; Ganho = 'reacao imediata ao acordar' },
+        # 'Kernel-Power' e o 507 (saida da espera moderna). Tarefa registrada
+        # antes dele so tem o Power-Troubleshooter, que num notebook com Modern
+        # Standby quase nunca dispara - por isso a checagem e pelo 507.
+        @{ Rotulo = 'trigger de resume (acorda -> verifica)'; Provider = 'Kernel-Power';         Ganho = 'reacao imediata ao acordar, inclusive da espera moderna' },
         @{ Rotulo = 'trigger de rede (conecta -> verifica)';  Provider = 'NetworkProfile';       Ganho = 'reacao imediata quando o Wi-Fi conecta' }
     )) {
         $tem = [bool](@($eventos | Where-Object { $_.Subscription -match $gat.Provider }).Count)
@@ -340,8 +343,10 @@ if (Test-IsLaptop) {
 
     # Os rotulos do powercfg sao traduzidos em Windows localizado; o formato
     # 0x00000000 dos indices nao e. Mesma armadilha do IsInRole com string.
+    # /qh e nao /q: com Modern Standby a tampa e a conectividade em espera vem
+    # ocultas, e o /q as omite - a verificacao avisava 'nao expoe' a toa.
     function Read-Indices($sub, $setting) {
-        $saida = (& powercfg /q SCHEME_CURRENT $sub $setting 2>&1 | Out-String)
+        $saida = (& powercfg /qh SCHEME_CURRENT $sub $setting 2>&1 | Out-String)
         $m = [regex]::Matches($saida, '0x[0-9A-Fa-f]{8}')
         if ($m.Count -lt 2) { return $null }
         return @{
@@ -419,10 +424,10 @@ if (Test-IsLaptop) {
         $pm = Get-NetAdapterPowerManagement -Name $nic.Name -ErrorAction SilentlyContinue
         if (-not $pm) { continue }
         if ($pm.AllowComputerToTurnOffDevice -eq 'Enabled') {
-            Test-Item "adaptador '$($nic.Name)': o Windows nao pode desliga-lo" 'aviso' `
-                'com isto ligado a rede pode demorar a voltar depois de acordar'
+            Test-Item "adaptador '$($nic.Name)': o Windows ainda pode desliga-lo" 'aviso' `
+                'a rede pode demorar a voltar depois de acordar; ajuste manual no Gerenciador de Dispositivos'
         } else {
-            Test-Item "adaptador '$($nic.Name)': o Windows nao pode desliga-lo" $true
+            Test-Item "adaptador '$($nic.Name)': o Windows nao o desliga" $true
         }
     }
 

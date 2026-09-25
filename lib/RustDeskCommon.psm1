@@ -312,25 +312,33 @@ function Get-LastResumeTime {
         suspende varias vezes por dia sem reiniciar, uma recusa gravada de
         manha valeria ate o proximo boot.
     .NOTES
-        Kernel-Power 107 e o evento de resume; Power-Troubleshooter 1 e o
-        fallback, que existe mesmo quando o 107 nao foi registrado. Sem
-        elevacao os dois canais sao legiveis.
+        Tres fontes, e vale a MAIS RECENTE entre elas:
+          - Kernel-Power 107: resume de S3/S4;
+          - Power-Troubleshooter 1: o mesmo resume, com o motivo do wake;
+          - Kernel-Power 507: saida da espera moderna (S0ix).
+        Num notebook com Modern Standby o ciclo real e S0 <-> espera moderna,
+        e 107/1 quase nao aparecem: numa maquina real o ultimo 107 tinha 9 dias
+        enquanto havia dezenas de 507 por dia. Devolver a primeira fonte que
+        respondesse, como antes, congelava a epoca nesse 107 antigo.
+        Sem elevacao os canais sao legiveis.
     #>
     [CmdletBinding()] param()
 
+    $ultimo = $null
     foreach ($f in @(
         @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power';         Id = 107 },
-        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Power-Troubleshooter'; Id = 1 }
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Power-Troubleshooter'; Id = 1 },
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power';         Id = 507 }
     )) {
         try {
             $ev = Get-WinEvent -FilterHashtable $f -MaxEvents 1 -ErrorAction Stop
-            if ($ev) { return $ev.TimeCreated }
+            if ($ev -and ($null -eq $ultimo -or $ev.TimeCreated -gt $ultimo)) { $ultimo = $ev.TimeCreated }
         } catch {
             # 'No events were found' e o caso normal em maquina que nunca
-            # suspendeu - tenta a proxima fonte em vez de falhar
+            # suspendeu - segue para a proxima fonte em vez de falhar
         }
     }
-    return $null
+    return $ultimo
 }
 
 function Get-PowerEpochStamp {
@@ -366,7 +374,9 @@ function New-RustDeskResumeTrigger {
     .NOTES
         New-ScheduledTaskTrigger nao expoe triggers de evento - por isso a
         instancia CIM crua. Power-Troubleshooter 1 e o evento de resume
-        completo, e o que carrega o motivo do wake.
+        completo, e o que carrega o motivo do wake. Kernel-Power 507 e a saida
+        da espera moderna: sem ele, num notebook com Modern Standby, o trigger
+        nunca dispara, porque ali quase nao ha S3.
 
         O Delay nao e cosmetico: sem ele a checagem roda antes de o Wi-Fi
         reassociar e conclui que a rede esta fora do ar.
@@ -377,7 +387,7 @@ function New-RustDeskResumeTrigger {
     param([int]$DelaySeconds = 20)
 
     $xml = @"
-<QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]</Select></Query></QueryList>
+<QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]</Select><Select Path="System">*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and EventID=507]]</Select></Query></QueryList>
 "@
     return New-RustDeskEventTrigger -Subscription $xml -DelaySeconds $DelaySeconds
 }

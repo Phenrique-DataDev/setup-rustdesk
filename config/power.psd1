@@ -50,9 +50,12 @@
     WirelessPowerSavingAC = 0
     WirelessPowerSavingDC = 0
 
-    # Desligar o "permitir que o computador desligue este dispositivo" do
-    # adaptador de rede ativo. E causa classica de voltar da suspensao com a
-    # rede fora do ar por alguns minutos. $null = nao mexer.
+    # Conferir o "permitir que o computador desligue este dispositivo" do
+    # adaptador de rede ativo - causa classica de voltar da suspensao com a
+    # rede fora do ar por alguns minutos. O passo SO LE e avisa: nenhum cmdlet
+    # controla esse bit, e a tentativa antiga (Disable-NetAdapterPowerManagement)
+    # nao o mudava, desligava o Wake on Magic Packet e reiniciava o Wi-Fi.
+    # O nome ficou por compatibilidade com power-custom.psd1. $null = nao olhar.
     DisableNicPowerSaving = $true
 
     # --- daemon RustDeskAwake -----------------------------------------
