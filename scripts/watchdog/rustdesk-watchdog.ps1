@@ -82,18 +82,22 @@ function Write-Log($msg) {
 }
 
 function Get-LastResume {
-    # Kernel-Power 107 e o resume; Power-Troubleshooter 1 e o fallback.
+    # Copia de Get-LastResumeTime (lib): o template roda isolado. Vale o mais
+    # recente entre 107 (resume S3/S4), Power-Troubleshooter 1 e 507 (saida da
+    # espera moderna) - em notebook com Modern Standby so o 507 anda.
     # Devolve $null em maquina que nunca suspendeu.
+    $ultimo = $null
     foreach ($f in @(
         @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power';         Id = 107 },
-        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Power-Troubleshooter'; Id = 1 }
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Power-Troubleshooter'; Id = 1 },
+        @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power';         Id = 507 }
     )) {
         try {
             $ev = Get-WinEvent -FilterHashtable $f -MaxEvents 1 -ErrorAction Stop
-            if ($ev) { return $ev.TimeCreated }
+            if ($ev -and ($null -eq $ultimo -or $ev.TimeCreated -gt $ultimo)) { $ultimo = $ev.TimeCreated }
         } catch { }
     }
-    return $null
+    return $ultimo
 }
 
 function Test-RecoveryConfigured {

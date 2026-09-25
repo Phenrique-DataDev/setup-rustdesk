@@ -91,7 +91,7 @@ $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
 $triggers = @($trigger)
 try {
     $triggers += New-RustDeskResumeTrigger -DelaySeconds 20
-    $log += 'trigger de resume adicionado (Power-Troubleshooter 1, atraso de 20s)'
+    $log += 'trigger de resume adicionado (Power-Troubleshooter 1 e Kernel-Power 507, atraso de 20s)'
 } catch {
     $log += "AVISO: nao foi possivel criar o trigger de resume: $($_.Exception.Message)"
     $log += '  O watchdog segue funcionando no boot e na repeticao; so nao reage na hora ao acordar.'

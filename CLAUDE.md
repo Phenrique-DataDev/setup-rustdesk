@@ -125,6 +125,15 @@ afetam quem edita este repo:
   `[Convert]::ToUInt32('80000000', 16)`. Há teste de regressão; não o remova.
 - **`$array -notmatch 'x'` não testa "nenhum casa"** — devolve os que não casam, e lista
   não-vazia é *truthy*. Conte os que casam. Já produziu falso positivo que escondeu um bug.
+- **`powercfg /q` omite settings ocultos.** Em notebook com Modern Standby a tampa e a
+  conectividade em espera vêm ocultas; leia sempre com `/qh`. Há teste estático e caso no
+  harness.
+- **Em Modern Standby, acordar é `Kernel-Power 507`**, não `Power-Troubleshooter 1` nem
+  `Kernel-Power 107`. O trigger de resume e o "último resume" (lib **e** cópia do watchdog)
+  consideram os três e usam o mais recente.
+- **Nenhum cmdlet controla o "permitir que o computador desligue este dispositivo".**
+  `Disable-NetAdapterPowerManagement` não mexe nele, desliga o WoL e reinicia o Wi-Fi. O
+  passo do adaptador é somente leitura; não volte a gravar ali sem testar num notebook.
 - **A guarda do IPv6 no watchdog é "uma vez por época", não por boot.** Época = boot + último
   resume. Com Fast Startup ligado o `LastBootUpTime` nem avança ao desligar e ligar.
 

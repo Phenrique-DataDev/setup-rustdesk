@@ -457,9 +457,9 @@ Write-Host ''
 Write-Host '=== Testes: energia (notebook) ===' -ForegroundColor Cyan
 
 It 'Set-PowerConfig.ps1 guarda cada efeito colateral contra modo simulacao' {
-    # powercfg e Disable-NetAdapterPowerManagement sao efeito real: um -WhatIf
-    # que reconfigura a maquina e pior do que inutil. Diferente do .toml, aqui
-    # nao ha funcao de lib no meio - a guarda tem que estar em cada chamada.
+    # powercfg e efeito real: um -WhatIf que reconfigura a maquina e pior do
+    # que inutil. Diferente do .toml, aqui nao ha funcao de lib no meio - a
+    # guarda tem que estar em cada chamada.
     $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Set-PowerConfig.ps1') -Raw
     Assert-True ($conteudo -match '\$simulando\s*=\s*\[bool\]\$WhatIfPreference') `
         'o script nao captura $WhatIfPreference'
@@ -468,14 +468,34 @@ It 'Set-PowerConfig.ps1 guarda cada efeito colateral contra modo simulacao' {
 
     $linhas = Get-Content -LiteralPath (Join-Path $scriptsDir 'Set-PowerConfig.ps1')
     $grava = $linhas | Where-Object {
-        $_ -match 'setacvalueindex|setdcvalueindex|Disable-NetAdapterPowerManagement' -and $_ -notmatch '^\s*#'
+        $_ -match 'setacvalueindex|setdcvalueindex' -and $_ -notmatch '^\s*#'
     }
     Assert-True ($grava.Count -gt 0) 'nenhuma chamada de escrita encontrada'
 
     # cada escrita tem que vir depois de um ShouldProcess no mesmo bloco
-    $texto = $conteudo
-    Assert-True (([regex]::Matches($texto, 'ShouldProcess')).Count -ge 2) `
-        'faltam guardas ShouldProcess antes das escritas'
+    Assert-True ($conteudo -match '\$PSCmdlet\.ShouldProcess') `
+        'falta guarda ShouldProcess antes das escritas'
+}
+
+It 'Set-PowerConfig.ps1 nao grava no adaptador de rede' {
+    # Disable-NetAdapterPowerManagement nao controla o bit que importa
+    # (AllowComputerToTurnOffDevice), desligava o Wake on Magic Packet por
+    # tabela e reiniciava o Wi-Fi a cada -All, derrubando sessao remota.
+    $linhas = Get-Content -LiteralPath (Join-Path $scriptsDir 'Set-PowerConfig.ps1')
+    $grava = @($linhas | Where-Object {
+        $_ -match '(Disable|Set)-NetAdapterPowerManagement' -and $_ -notmatch '^\s*#'
+    })
+    Assert-Equal 0 $grava.Count "voltou a gravar no adaptador: $($grava -join ' | ')"
+}
+
+It 'leitura de energia usa powercfg /qh, que inclui settings ocultos' {
+    # Com Modern Standby a tampa e a conectividade em espera vem ocultas; o /q
+    # as omite e o passo pulava opcoes que existiam.
+    foreach ($arq in 'Set-PowerConfig.ps1', 'Test-RustDeskSetup.ps1', 'Get-PowerDiagnostics.ps1') {
+        $linhas = Get-Content -LiteralPath (Join-Path $scriptsDir $arq)
+        $q = @($linhas | Where-Object { $_ -match 'powercfg /q\s+SCHEME_CURRENT' -and $_ -notmatch '^\s*#' })
+        Assert-Equal 0 $q.Count "$arq le com /q: $(if ($q) { $q[0].Trim() })"
+    }
 }
 
 It 'Set-PowerConfig.ps1 confirma o valor em vez de afirmar que gravou' {

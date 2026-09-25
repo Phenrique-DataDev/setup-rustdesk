@@ -104,7 +104,7 @@ foreach ($item in @(
     @{ Sub = 'SUB_NONE';    Setting = 'F15576E8-98B7-4186-B944-EAFA664402D9'; Rotulo = 'conectividade em espera' },
     @{ Sub = '19CBB8FA-5279-450E-9FAC-8A3D5FEDD0C1'; Setting = '12BBEBE6-58D6-4636-95BB-3217EF867C1A'; Rotulo = 'economia de energia do Wi-Fi' }
 )) {
-    $saida = (& powercfg /q SCHEME_CURRENT $item.Sub $item.Setting 2>&1 | Out-String)
+    $saida = (& powercfg /qh SCHEME_CURRENT $item.Sub $item.Setting 2>&1 | Out-String)
     # Os rotulos do powercfg sao traduzidos; o formato 0x00000000 nao e.
     $m = [regex]::Matches($saida, '0x[0-9A-Fa-f]{8}')
     if ($m.Count -ge 2) {

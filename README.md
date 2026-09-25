@@ -431,7 +431,7 @@ Os valores ficam em `config/power.psd1` (copie para `power-custom.psd1` para alt
 | Hibernar por ociosidade | nunca | Hibernar derruba o serviço e a sessão do Herdr; é o pior caso. |
 | Desligar o painel | 10 min / 3 min | Economia gratuita: a captura de tela do RustDesk continua funcionando com o monitor apagado, e em notebook o painel é o maior consumidor isolado. |
 | Conectividade de rede em espera | ligada | Só existe em máquina com Modern Standby (S0ix); onde não existe, o passo é pulado sem erro. |
-| Power saving do adaptador de rede | desligado | *Permitir que o computador desligue este dispositivo* é o suspeito número um de "acordou, mas o RustDesk só reconectou minutos depois". |
+| Power saving do adaptador de rede | **só conferido**, com aviso | *Permitir que o computador desligue este dispositivo* é o suspeito número um de "acordou, mas o RustDesk só reconectou minutos depois". Nenhum cmdlet controla esse bit: o `Disable-NetAdapterPowerManagement` usado até 2026-09 não o mudava num notebook real, desligava o Wake on Magic Packet por tabela e **reiniciava o Wi-Fi a cada `-All`**, o que derruba uma sessão remota feita por ele. O passo agora só avisa, e o ajuste fica manual no Gerenciador de Dispositivos. |
 | Economia de energia do adaptador sem fio | desempenho máximo, na tomada e na bateria | O Equilibrado vem com economia **média na bateria**: a placa dorme entre pacotes, e no Terminal remoto isso vira pico de latência e, em sinal fraco, queda. Em máquina com Modern Standby o Windows costuma ocultar a opção e deixar com o driver; aí o passo é pulado sem erro. |
 
 ### A suspensão na bateria não é desligada — ela é bloqueada só quando importa
@@ -459,8 +459,13 @@ O watchdog tem dois gatilhos por evento, além do boot e da repetição de 10 mi
 
 | Evento | Atraso | Sem ele |
 |---|---|---|
-| `Microsoft-Windows-Power-Troubleshooter` ID 1 (acordou) | 20 s, para o Wi-Fi reassociar | a máquina podia passar um intervalo inteiro depois de acordar com o serviço em estado ruim |
+| `Microsoft-Windows-Power-Troubleshooter` ID 1 (acordou de S3/S4) e `Microsoft-Windows-Kernel-Power` ID 507 (saiu da espera moderna) | 20 s, para o Wi-Fi reassociar | a máquina podia passar um intervalo inteiro depois de acordar com o serviço em estado ruim. Sem o 507, num notebook com Modern Standby o trigger **nunca disparava**: ali o ciclo real é S0 ⇄ espera moderna, e o ID 1 quase não aparece |
 | `Microsoft-Windows-NetworkProfile` ID 10000 (conectou numa rede) | 30 s, para o DNS e o Router Advertisement assentarem | no Wi-Fi, o serviço que subiu com o DNS fora do ar ficaria até 10 min sem IPv6 — a passada do boot roda antes de o Wi-Fi associar e não vê IPv6 para corrigir |
+
+O mesmo vale para o carimbo de época abaixo: o "último resume" é o **mais recente** entre
+`Kernel-Power 107`, `Power-Troubleshooter 1` e `Kernel-Power 507`. Tarefas registradas antes
+do 507 precisam ser reinstaladas (`-Watchdog` e `-Power`) para ganhar o trigger novo; a
+verificação avisa enquanto isso não acontece.
 
 O de rede também cobre **trocar de rede sem suspender** (sair de casa para o hotspot do
 celular). Ele dispara várias vezes por boot — o Windows registra `Identificando...` e os
