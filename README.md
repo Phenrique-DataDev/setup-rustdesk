@@ -246,10 +246,18 @@ Uma regra **Block** para o RustDesk vence qualquer Allow. Ela é apontada na ver
 
 Com a sessão aberta, a qualidade é ajustada sozinha. O host mede o atraso a cada poucos
 segundos e, **acima de 150 ms**, baixa quadros por segundo e taxa de bits até o atraso voltar.
-Isso é o controle automático de taxa (`enable-abr`), ligado por padrão. Também já vêm ligados
-por padrão a codificação por hardware (`enable-hwcodec`) e a opção de manter a máquina
-acordada durante sessões recebidas. O repositório não mexe nessas opções porque o padrão já é
-o melhor valor.
+Isso é o controle automático de taxa (`enable-abr`). O que o repositório fixa no host:
+
+| Chave | Valor | Por quê |
+|---|---|---|
+| `enable-abr` | `Y` | Controle automático de taxa. Já é o padrão; fica explícito para não depender do padrão de versões futuras. |
+| `enable-hwcodec` | `Y` | Codificação pela placa de vídeo quando os dois lados suportam. Idem: padrão, gravado explícito. |
+| `allow-remove-wallpaper` | `Y` | Tira o papel de parede enquanto há sessão e devolve ao fim. O fundo é a parte mais cara de transmitir: sem ele cai o volume ao abrir a sessão e ao arrastar janelas, o que pesa mais no relay e com upload disputado. O padrão do RustDesk é desligado. |
+
+O custo do último é visível: quem estiver na frente da máquina vê a área de trabalho sem
+fundo durante a sessão. Para manter o fundo, ponha `'allow-remove-wallpaper' = 'N'` no
+`config/custom.psd1`. Manter a máquina acordada durante sessões recebidas já vem ligado por
+padrão.
 
 O resto é escolhido por **quem conecta**, na barra da sessão, e não pela config do host:
 
