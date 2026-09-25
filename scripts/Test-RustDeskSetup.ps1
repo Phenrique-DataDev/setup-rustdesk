@@ -103,8 +103,12 @@ if ($svc) {
 
 if ($elevated -and $svc) {
     $qf = (& sc.exe qfailure $paths.ServiceName) -join ' '
-    # a saida do sc.exe e localizada; o numero 5000 (ms) aparece em qualquer idioma
-    Test-Item 'recovery do SCM configurado' ($qf -match '5000') 'reinicio automatico apos falha'
+    # A saida do sc.exe e localizada; o atraso em ms nao. Numero inteiro: '5000'
+    # solto casaria 15000 ou 150000 e aprovaria recovery que nao e o nosso.
+    $temRecovery = $qf -match '(?<!\d)5000(?!\d)'
+    Test-Item 'recovery do SCM configurado' $temRecovery `
+        $(if ($temRecovery) { 'reinicio automatico apos falha' }
+          else { 'ausente - o servico foi recriado (ex.: parar/iniciar pela interface). O watchdog reaplica na proxima passada; ou rode Setup.ps1 -Install' })
 }
 
 # --- configs -----------------------------------------------------------
@@ -139,6 +143,14 @@ foreach ($alvo in @(
 
     foreach ($k in $esperado.Keys) {
         $atual = Get-TomlOption -Path $alvo.Arquivo -Key $k
+        # stop-service ausente e o estado canonico de "ligado": para religar o
+        # servico o proprio RustDesk grava stop-service = '', que remove a
+        # chave, e so para o servico com 'Y' explicito. Cobrar 'N' literal
+        # reprovaria toda maquina cujo servico ja foi religado pela interface.
+        if ($k -eq 'stop-service' -and $esperado[$k] -eq 'N' -and $null -eq $atual) {
+            Test-Item "$($alvo.Nome): $k = '$($esperado[$k])'" $true 'ausente - equivale a N (e como o RustDesk grava ao religar)'
+            continue
+        }
         Test-Item "$($alvo.Nome): $k = '$($esperado[$k])'" ($atual -eq $esperado[$k]) `
             $(if ($null -eq $atual) { 'ausente do arquivo' } elseif ($atual -ne $esperado[$k]) { "encontrado: '$atual'" } else { '' })
     }

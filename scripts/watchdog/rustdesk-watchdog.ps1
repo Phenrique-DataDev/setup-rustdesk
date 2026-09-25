@@ -9,13 +9,21 @@
       2. o servico existe (reinstala se sumiu);
       3. o servico esta Running (inicia se caiu);
       4. o StartType e Automatic;
-      5. nenhuma das configs tem stop-service = 'Y';
-      6. o servico enxerga o IPv6 (so quando a maquina tem IPv6 global).
+      5. as recovery actions do SCM existem (reinicio automatico apos falha);
+      6. nenhuma das configs tem stop-service = 'Y';
+      7. o servico enxerga o IPv6 (so quando a maquina tem IPv6 global).
 
-    O item 5 importa porque um servico "OK" com stop-service = 'Y' na config
+    O item 5 existe porque o servico e recriado do zero mais vezes do que
+    parece. "Parar servico" na interface do RustDesk faz sc delete, e "Iniciar
+    servico" faz sc create - um servico novo, sem recovery actions. O proprio
+    item 2 deste watchdog cai no mesmo caminho (--install-service). Sem recovery,
+    uma queda so e corrigida na proxima passada daqui, em ate N minutos, em
+    vez de 5 s pelo SCM.
+
+    O item 6 importa porque um servico "OK" com stop-service = 'Y' na config
     recusa conexoes: o acesso remoto fica morto com todos os indicadores verdes.
 
-    O item 6 existe por uma corrida no boot: o servico e AUTO_START e sobe
+    O item 7 existe por uma corrida no boot: o servico e AUTO_START e sobe
     antes de a rede ficar pronta. O log mostra 'Failed to bind IPv6 socket ...
     os error 11001' (WSAHOST_NOT_FOUND): o DNS ainda nao resolve os STUN, e o
     servico segue SEM IPv6 ate alguem reinicia-lo. Como IPv6 nao tem NAT,
@@ -82,6 +90,14 @@ function Get-LastResume {
     return $null
 }
 
+function Test-RecoveryConfigured {
+    # Recebe a saida do 'sc.exe qfailure'. Ela e traduzida, mas o atraso em ms
+    # nao: procura 5000 como numero inteiro. '-match 5000' casaria 15000 ou
+    # 150000, que sao atrasos de outro servico, e aprovaria o errado.
+    param([string]$Saida)
+    return [bool]($Saida -match '(?<!\d)5000(?!\d)')
+}
+
 function Get-EpochStamp {
     # Carimbo de "uma tentativa por epoca". Boot sozinho nao serve em portatil.
     $boot = try { (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('o') } catch { '-' }
@@ -137,6 +153,24 @@ if ($svc -and $svc.StartType -ne 'Automatic') {
     }
 }
 
+# --- 5. recovery actions do SCM ---------------------------------------
+# Mesmos valores de scripts/Install-RustDesk.ps1 - ha teste que confere.
+$recoveryActions = 'restart/5000/restart/5000/restart/5000'
+if ($svc) {
+    $qf = (& sc.exe qfailure rustdesk 2>&1) -join ' '
+    if (-not (Test-RecoveryConfigured $qf)) {
+        Write-Log 'AVISO: servico sem recovery actions (foi recriado?). Reaplicando reinicio automatico apos falha.'
+        & sc.exe failure rustdesk reset= 0 actions= $recoveryActions | Out-Null
+        & sc.exe failureflag rustdesk 1 | Out-Null
+        # Reconsultar em vez de anunciar, como no item 4.
+        if (Test-RecoveryConfigured ((& sc.exe qfailure rustdesk 2>&1) -join ' ')) {
+            Write-Log 'Recovery actions reaplicadas.'
+        } else {
+            Write-Log 'ERRO: recovery actions continuam ausentes apos sc.exe failure.'
+        }
+    }
+}
+
 foreach ($cfg in $cfgFiles) {
     if (-not (Test-Path $cfg)) { continue }
     $linhas = Get-Content $cfg
@@ -155,7 +189,7 @@ foreach ($cfg in $cfgFiles) {
     }
 }
 
-# --- 6. IPv6 visto pelo servico ---------------------------------------
+# --- 7. IPv6 visto pelo servico ---------------------------------------
 # Ver o cabecalho para o porque. A ordem das guardas importa: cada uma sozinha
 # ja evita um modo de falha diferente, e a mais barata vem primeiro.
 if ($svcLogDir -and (Test-Path $svcLogDir)) {

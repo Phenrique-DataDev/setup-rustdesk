@@ -520,6 +520,24 @@ It 'o carimbo de epoca do watchdog inclui o resume, nao so o boot' {
         'o stamp gravado nao e o carimbo de epoca'
 }
 
+It 'o watchdog reaplica as mesmas recovery actions do instalador' {
+    # O watchdog e um template isolado (roda em ProgramData, sem lib/), entao a
+    # string e duplicada. Este teste impede que as duas copias divirjam.
+    $inst = Get-Content -LiteralPath (Join-Path $repoRaiz 'scripts\Install-RustDesk.ps1') -Raw
+    $wd   = Get-Content -LiteralPath (Join-Path $repoRaiz 'scripts\watchdog\rustdesk-watchdog.ps1') -Raw
+    Assert-True ($inst -match 'actions= (\S+)') 'Install-RustDesk nao define actions='
+    $doInstalador = $Matches[1]
+    Assert-True ($wd -match "\`$recoveryActions = '([^']+)'") 'o watchdog nao define $recoveryActions'
+    Assert-Equal $doInstalador $Matches[1] 'as recovery actions divergiram entre instalador e watchdog'
+}
+
+It 'a checagem de recovery nao casa 5000 solto' {
+    # '-match 5000' aprovaria 15000 ou 150000 - atraso de outra configuracao.
+    $t = Get-Content -LiteralPath (Join-Path $repoRaiz 'scripts\Test-RustDeskSetup.ps1') -Raw
+    Assert-True ($t -notmatch "-match '5000'") 'Test-RustDeskSetup voltou a casar 5000 solto'
+    Assert-True ($t -match [regex]::Escape("(?<!\d)5000(?!\d)")) 'Test-RustDeskSetup nao usa o 5000 delimitado'
+}
+
 It 'o daemon solta o bloqueio ao sair' {
     # Um daemon morto deixando a maquina insone para sempre e pior do que nao
     # ter daemon nenhum.
