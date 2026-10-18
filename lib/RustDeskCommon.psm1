@@ -222,6 +222,35 @@ function Test-HerdrServer {
     }
 }
 
+function Wait-HerdrServer {
+    <#
+    .SYNOPSIS
+        Aguarda o servidor do Herdr ficar disponivel ate um prazo limitado.
+    .DESCRIPTION
+        O processo pode demorar mais durante logon, restauracao de sessao ou
+        saida de espera. Polling evita tanto o falso negativo de uma espera
+        fixa quanto uma espera indefinida quando o servidor nao sobe.
+    #>
+    [CmdletBinding()]
+    param(
+        [ValidateRange(1, 300)]
+        [int]$TimeoutSeconds = 15,
+        [ValidateRange(50, 5000)]
+        [int]$PollMilliseconds = 250
+    )
+
+    $limite = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        if (Test-HerdrServer) { return $true }
+
+        $restante = ($limite - (Get-Date)).TotalMilliseconds
+        if ($restante -le 0) { break }
+        Start-Sleep -Milliseconds ([Math]::Max(1, [int][Math]::Min($PollMilliseconds, $restante)))
+    } while ((Get-Date) -lt $limite)
+
+    return $false
+}
+
 function Test-IsLaptop {
     <#
     .SYNOPSIS
@@ -636,7 +665,7 @@ function Start-RustDeskUI {
 }
 
 Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Get-HerdrPaths,
-                              Test-HerdrServer, Import-RustDeskConfigFile,
+                              Test-HerdrServer, Wait-HerdrServer, Import-RustDeskConfigFile,
                               Get-RustDeskPin, Get-RustDeskVersion, Resolve-RustDeskLatestVersion,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI,
                               Test-IsLaptop, Get-BatteryPercent, Test-RemoteSessionActive,

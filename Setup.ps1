@@ -55,6 +55,10 @@ param(
     [int]$IntervalMinutes = 10,
     [switch]$SkipHerdrInstall,
     [switch]$ShowLogs,
+    [ValidateRange(1, 300)]
+    [int]$StartupTimeoutSeconds = 15,
+    [ValidateRange(50, 5000)]
+    [int]$StartupPollMilliseconds = 250,
     [System.Security.SecureString]$Password
 )
 
@@ -129,6 +133,8 @@ if ($Herdr) {
     Write-Passo 'Instalando e configurando o Herdr (terminal da sessao)'
     $p = @{}
     if ($SkipHerdrInstall) { $p['SkipInstall'] = $true }
+    $p['StartupTimeoutSeconds'] = $StartupTimeoutSeconds
+    $p['StartupPollMilliseconds'] = $StartupPollMilliseconds
     & (Join-Path $PSScriptRoot 'scripts\Install-Herdr.ps1') @p
 
     $p = @{}

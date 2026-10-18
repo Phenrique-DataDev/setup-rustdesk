@@ -20,6 +20,11 @@ opera a máquina. Restam **0, 1 e 2** — o mesmo cenário sob dois ângulos —
 definido: **recebem um relatório quando o `Setup.ps1 -All` for executado num notebook**. Até
 lá não há trabalho a fazer neles; o que falta é a saída de uma execução real, não código.
 
+Revisado em **2026-10-18**: o pin do RustDesk subiu para **1.5.0** após conferência do MSI,
+hash SHA-256 e assinatura Authenticode. O README passou a documentar o workflow operacional
+com teste manual de `Win+L`; os itens 0, 1 e 2 continuam pendentes por falta da execução em
+uma máquina Windows zerada/notebook.
+
 Ordenado por **risco de morder**, não por esforço.
 
 ---
@@ -31,7 +36,7 @@ mexe em configuração de sistema e cujo caminho de execução ninguém percorre
 
 O que **foi** verificado, na máquina de referência (desktop, Windows 11 Pro 26200 pt-BR):
 
-- 44 testes estáticos e **30 testes de harness** passando. O harness
+- 51 testes de biblioteca e **49 testes de harness** passando. O harness
   (`tests/Power.Harness.ps1`) roda os scripts de verdade contra um `powercfg` e cmdlets de
   rede substituídos por stubs, numa cópia temporária do repositório — nada toca o sistema;
 - **o daemon foi executado de ponta a ponta**, com a máquina de estados inteira encenada:

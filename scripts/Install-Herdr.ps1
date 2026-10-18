@@ -29,6 +29,12 @@
 .PARAMETER NoStart
     Nao sobe o servidor agora; ele subira no proximo logon.
 
+.PARAMETER StartupTimeoutSeconds
+    Prazo maximo para confirmar que o servidor respondeu depois de iniciado.
+
+.PARAMETER StartupPollMilliseconds
+    Intervalo entre as consultas de estado durante a confirmacao.
+
 .PARAMETER ExpectedSha256
     SHA-256 esperado do install.ps1. Sem isto o script apenas registra o hash
     do que baixou. Com isto, uma divergencia aborta a instalacao - util para
@@ -48,6 +54,10 @@ param(
     [switch]$SkipInstall,
     [switch]$NoAutostart,
     [switch]$NoStart,
+    [ValidateRange(1, 300)]
+    [int]$StartupTimeoutSeconds = 15,
+    [ValidateRange(50, 5000)]
+    [int]$StartupPollMilliseconds = 250,
     [string]$ExpectedSha256
 )
 
@@ -55,6 +65,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\lib\RustDeskCommon.psm1') -Force
 
 $log   = @()
+$autostartError = $null
 $paths = Get-HerdrPaths
 
 # O perfil alvo e o de quem esta rodando. Elevar pelo UAC preserva o usuario;
@@ -224,6 +235,7 @@ if (`$status -match '(?m)^\s*status:\s*running') { exit 0 }
         } catch {
             $log += "FALHA ao registrar o autostart: $($_.Exception.Message)"
             $log += '  o Herdr continua utilizavel abrindo "herdr" a mao.'
+            $autostartError = $_.Exception
         }
     }
 }
@@ -237,11 +249,12 @@ if ($NoStart) {
 } elseif ($PSCmdlet.ShouldProcess('herdr server', 'iniciar o servidor headless')) {
     try {
         Start-Process -FilePath $paths.Exe -ArgumentList 'server' -WindowStyle Hidden | Out-Null
-        Start-Sleep -Seconds 3
-        if (Test-HerdrServer) {
+        if (Wait-HerdrServer -TimeoutSeconds $StartupTimeoutSeconds `
+                             -PollMilliseconds $StartupPollMilliseconds) {
             $log += 'servidor iniciado'
         } else {
-            $log += 'AVISO: o servidor nao respondeu em 3s. Verifique com "herdr status server".'
+            $log += "AVISO: o servidor nao respondeu em $StartupTimeoutSeconds s."
+            $log += '  Verifique com "herdr status server".'
             $log += "  log do servidor: $($paths.ServerLog)"
         }
     } catch {
@@ -250,3 +263,6 @@ if ($NoStart) {
 }
 
 $log | ForEach-Object { Write-Host "  $_" }
+if ($autostartError) {
+    throw "o autostart do Herdr falhou: $($autostartError.Message)"
+}
