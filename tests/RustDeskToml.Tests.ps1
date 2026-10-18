@@ -452,6 +452,32 @@ It 'Set-RustDeskConfig.ps1 nao para o servico em modo simulacao' {
         'Stop-RustDeskClean nao esta guardado contra modo simulacao'
 }
 
+It 'Install-Herdr falha quando o autostart nao pode ser confirmado' {
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Install-Herdr.ps1') -Raw
+    Assert-True ($conteudo -match '\$autostartError\s*=\s*\$_\.Exception') `
+        'falha do registro nao e preservada'
+    Assert-True ($conteudo -match 'throw "o autostart do Herdr falhou') `
+        'falha do autostart nao altera o resultado do script'
+}
+
+It 'Install-Herdr usa polling configuravel para confirmar o servidor' {
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Install-Herdr.ps1') -Raw
+    Assert-True ($conteudo -match 'Wait-HerdrServer') `
+        'confirmacao nao usa o helper de polling'
+    Assert-True ($conteudo -match '\$StartupTimeoutSeconds') `
+        'prazo de inicializacao nao e configuravel'
+    Assert-True ($conteudo -notmatch 'Start-Sleep -Seconds 3') `
+        'espera fixa de tres segundos permaneceu'
+}
+
+It 'Setup.ps1 encaminha o prazo de inicializacao do Herdr' {
+    $conteudo = Get-Content -LiteralPath (Join-Path $repoRaiz 'Setup.ps1') -Raw
+    Assert-True ($conteudo -match '\$p\[''StartupTimeoutSeconds''\]\s*=\s*\$StartupTimeoutSeconds') `
+        'Setup.ps1 nao encaminha StartupTimeoutSeconds'
+    Assert-True ($conteudo -match '\$p\[''StartupPollMilliseconds''\]\s*=\s*\$StartupPollMilliseconds') `
+        'Setup.ps1 nao encaminha StartupPollMilliseconds'
+}
+
 
 Write-Host ''
 Write-Host '=== Testes: energia (notebook) ===' -ForegroundColor Cyan

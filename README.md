@@ -32,8 +32,10 @@ cd setup-rustdesk
 .\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')
 ```
 
-São 6 passos e ao final não sobra passo manual. Sem `-Password` o setup roda igual mas
-termina apontando que a senha falta — veja abaixo.
+O número de passos é calculado conforme as opções e o hardware: o passo de energia só aparece
+em notebook, e o passo da senha só aparece quando `-Password` é usado. Com a senha fornecida,
+o setup termina sem passo manual pendente. Sem `-Password`, ele roda igual mas termina
+apontando que a senha falta — veja abaixo.
 
 Se o Windows bloquear a execução dos scripts:
 
@@ -69,6 +71,26 @@ Depois, rode `.\Setup.ps1` de novo como Administrador para conferir também o pe
 serviço. A verificação avisa explicitamente quando é só a senha que falta.
 
 Editar o `RustDesk.toml` na mão **não** funciona: ele guarda hash e salt, não a senha.
+
+---
+
+## Workflow operacional recomendado
+
+Depois da instalação, valide o caminho completo antes de confiar a máquina a um trabalho longo:
+
+1. Rode `.\Setup.ps1` como Administrador e confirme que não há falhas.
+2. De outro dispositivo, conecte com a máquina desbloqueada e abra o Terminal do RustDesk.
+3. Inicie ou reate o Herdr e confirme que os agentes e panes aparecem.
+4. Na máquina remota, pressione `Win+L` e conecte novamente. A área de trabalho e o Terminal
+   devem continuar acessíveis com a tela bloqueada.
+5. No Terminal, crie ou reate uma sessão do Herdr e inicie um trabalho pequeno de teste.
+6. Desconecte o cliente, espere alguns segundos, reconecte e confirme que o processo continua.
+7. Para trabalhos longos, mantenha a sessão do Windows conectada: bloqueio de tela é suportado;
+   logoff, reboot e shutdown encerram o `herdr server` e os processos dele.
+
+Esse teste manual com `Win+L` e outro dispositivo é obrigatório para confirmar o cenário
+principal. A verificação automática confirma arquivos, serviços, tarefas e opções, mas não
+prova uma conexão remota real com a tela bloqueada.
 
 ---
 
@@ -124,7 +146,8 @@ do usuário e é verificada por completo sem elevação.
 
 Opções úteis: `-IntervalMinutes 5` (frequência do watchdog), `-SkipPower`, `-ConfigFile caminho.psd1`
 (RustDesk), `-HerdrConfigFile caminho.psd1`, `-SkipHerdrInstall` (só configura um Herdr já
-instalado).
+instalado), `-StartupTimeoutSeconds 30` (prazo para confirmar o servidor do Herdr) e
+`-StartupPollMilliseconds 500` (intervalo entre consultas durante essa confirmação).
 
 O passo do Herdr **não** eleva: ele instala no perfil do usuário e registra uma tarefa do
 próprio usuário. Rodar `-All` como Administrador funciona porque o UAC eleva o *mesmo*
@@ -285,8 +308,8 @@ rede inteira caindo (`NetworkProfile` 10001), não com o servidor de DNS parado.
 
 ### Versão fixada e atualizações desligadas
 
-A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.4.9` (última estável em
-2026-08-11). Sem pin, duas máquinas montadas com este repo em semanas diferentes acabam em
+A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.5.0` (última estável em
+2026-10-18). Sem pin, duas máquinas montadas com este repo em semanas diferentes acabam em
 versões diferentes — o oposto de *clonou, pediu, funciona*.
 
 O instalador baixa o `.msi` da release do GitHub e **só executa depois de duas conferências**:
@@ -416,7 +439,7 @@ bateria**; em desktop não roda, e a seção de energia nem aparece na verifica�
 
 ```powershell
 .\Setup.ps1 -Power          # só a parte de energia. Exige Administrador.
-.\Setup.ps1 -All -SkipPower # notebook, mas sem mexer em energia
+.\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')
 ```
 
 ### O que muda
@@ -806,7 +829,8 @@ Com Wi-Fi instável — de qualquer um dos lados — isso vira rotina. A opção
 A chave interna é `terminal-persistent`. Com ela ligada, o shell continua vivo no host depois
 da queda, e a reconexão volta nele. Um Terminal persistente que ficou sem nenhuma aba aberta é
 limpo depois de 2 h ociosas. Os nomes e o comportamento foram conferidos no código do
-RustDesk 1.4.9; a reconexão com a opção ligada ainda não foi exercitada nesta stack.
+RustDesk 1.4.9; a reconexão com a opção ligada ainda não foi exercitada nesta stack nem
+revalidada no pin 1.5.0.
 
 O que **não** ajuda aqui é `force-always-relay` (*Sempre conectar via relay*): ele só pula a
 espera do punch na hora de conectar, e troca um P2P que funciona por um relay mais distante.
@@ -1023,9 +1047,9 @@ scripts/network-check.html      a página: botão, caixa de resultado, estilo
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
 scripts/awake/                  template do daemon de energia
-tests/RustDeskToml.Tests.ps1    44 testes, sem tocar em instalação real
+tests/RustDeskToml.Tests.ps1    testes de TOML, pin, WhatIf e regressões, sem instalação real
 tests/Test-Syntax.ps1           parser + ASCII em todos os scripts
-tests/Power.Harness.ps1         30 testes de execução, com powercfg stubado
+tests/Power.Harness.ps1         harness de execução, com powercfg stubado
 .github/workflows/ci.yml        roda os três a cada PR e push na main, mais o
                                 aviso de pin desatualizado
 ```

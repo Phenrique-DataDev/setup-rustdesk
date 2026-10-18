@@ -128,11 +128,11 @@ Ao apertar Enter, aparece `senha:` e o cursor fica parado.
 > **Enter** normalmente.
 
 A partir daí o script trabalha sozinho por alguns minutos, imprimindo blocos numerados
-(`1/6`, `2/6`, …). Ele baixa o instalador do RustDesk (versão fixada **1.4.9**, com o
+(`1/N`, `2/N`, …). Ele baixa o instalador do RustDesk (versão fixada **1.5.0**, com o
 hash e a assinatura conferidos antes de executar), instala, aplica as configurações,
 instala o vigia que garante que o serviço não morre, instala o Herdr e grava a senha.
 
-**Resultado esperado:** no fim, o bloco `6/6 Verificando` e a linha verde:
+**Resultado esperado:** no fim, o bloco `N/N Verificando` e a linha verde:
 
 ```
 === OK: nenhuma falha (N aviso(s)) ===
@@ -220,4 +220,4 @@ nunca altera nada.
 ---
 
 *Mantido junto com o `README.md` — ao mudar um passo do `Setup.ps1`, revise este arquivo.
-Os comandos aqui refletem o repositório em 2026-08-17 (RustDesk fixado em 1.4.9).*
+Os comandos aqui refletem o fluxo atual do repositório (RustDesk fixado em 1.5.0).
