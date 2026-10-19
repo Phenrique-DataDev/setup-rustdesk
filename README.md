@@ -128,6 +128,7 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\scripts\Get-PowerDiagnostics.ps1` | Coleta o estado de energia num relatório. Não altera nada. | não\*\* |
 | `.\scripts\Show-NetworkCheck.ps1` | Página no navegador com o botão *Verificar rede*. Não altera nada. | não |
+| [`docs/NETWORK-DIAGNOSTICS.md`](docs/NETWORK-DIAGNOSTICS.md) | Guia para gerar diagnóstico completo de rede, firewall e portas efêmeras. | não |
 | `.\scripts\Install-AwakeGuard.ps1 -Uninstall` | Remove o daemon de energia | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
 | `.\tests\RustDeskToml.Tests.ps1` | Testes da biblioteca (em arquivos temporários) | não |
@@ -225,8 +226,17 @@ caminho que não passa por lá:
 | `direct-server` | `Y` | Aceita conexão direta por IP. Quem conecta digita o IP em vez do ID: sem rendezvous, sem punch, sem relay. |
 | `direct-access-port` | `21118` | Porta dessa conexão direta (padrão do RustDesk). |
 | `enable-lan-discovery` | `Y` | A máquina aparece sozinha na aba de descoberta dos clientes da mesma rede. |
+| `enable-tcp-punch` | `Y` | Tenta atravessar NAT por TCP antes de usar relay. |
+| `enable-udp-punch` | `Y` | Tenta atravessar NAT por UDP, normalmente o caminho mais eficiente. |
+| `enable-ipv6-punch` | `Y` | Usa IPv6 quando disponível, evitando NAT e reduzindo a demora de abertura. |
+| `disable-udp` | `N` | Mantém UDP disponível para registro, NAT traversal e conexão direta. |
+| `allow-insecure-tls-fallback` | `N` | Não aceita fallback TLS inseguro se uma rede intermediária interferir na conexão. |
 
 O ID continua funcionando: isto **adiciona** um caminho, não substitui o existente.
+
+As opções de punch ficam em `config/local.psd1` porque pertencem ao `LocalConfig`
+(`RustDesk.toml`). Elas não forçam conexão direta nem desligam o relay: se o NAT, o
+firewall ou a rede não permitirem P2P, o RustDesk continua usando relay como fallback.
 
 - **Mesma rede:** resolvido, e confirmado na prática — pelo IP local a sessão abre
   visivelmente mais rápido (validado em 2026-08-10).
