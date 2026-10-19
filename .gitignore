@@ -9,6 +9,7 @@ config/version-custom.psd1
 *.log
 *-result.txt
 *.bak
+diagnostics/
 
 # Nunca versionar: os RustDesk.toml carregam senha, salt e chaves do dispositivo
 RustDesk.toml

@@ -633,7 +633,14 @@ $casosResume = @(
                'Microsoft-Windows-Kernel-Power/507' = [datetime]'2026-09-20 09:00:00' } },
     @{ Nome = 'nunca suspendeu'; Vazio = $true; Ev = @{} }
 )
-$modCommon = Get-Module RustDeskCommon
+# Quando o harness e chamado isoladamente ha uma unica copia carregada. Em uma
+# suite encadeada, porem, os testes anteriores podem ter carregado a lib do
+# repositorio e a copia do sandbox fica com o mesmo nome. Selecionar pelo
+# caminho evita invocar duas copias e receber uma matriz em vez de um modulo.
+$modCommon = Get-Module RustDeskCommon |
+             Where-Object { $_.Path -eq $mod } |
+             Select-Object -First 1
+if (-not $modCommon) { throw "modulo de teste nao carregado: $mod" }
 foreach ($c in $casosResume) {
     It "ultimo resume: $($c.Nome) (lib e watchdog)" {
         $global:eventosFalsos = $c.Ev

@@ -29,4 +29,22 @@
     # A atualizacao automatica em si e barrada por 'allow-auto-update', que
     # vive na outra config - veja config/default.psd1.
     'enable-check-update' = 'N'
+
+    # --- caminho de rede ---------------------------------------------
+    # Deixe o RustDesk tentar conexao direta antes de cair no relay. Estas
+    # chaves ficam no LocalConfig (RustDesk.toml), nao no RustDesk2.toml.
+    # TCP e UDP cobrem redes que bloqueiam um dos transportes; IPv6 evita
+    # NAT quando a rede oferece um endereco global utilizavel.
+    'enable-tcp-punch'    = 'Y'
+    'enable-udp-punch'    = 'Y'
+    'enable-ipv6-punch'   = 'Y'
+
+    # O transporte UDP e necessario para o melhor caminho de NAT traversal.
+    # N explicito evita que uma mudanca de default de versao o desabilite.
+    'disable-udp'         = 'N'
+
+    # Nao permitir fallback TLS inseguro em redes com proxy ou inspecao TLS.
+    # Se uma rede quebrar a conexao segura, o relay deve falhar de forma
+    # visivel, nao aceitar um transporte menos seguro.
+    'allow-insecure-tls-fallback' = 'N'
 }

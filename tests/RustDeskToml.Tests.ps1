@@ -139,6 +139,15 @@ It 'Get-TomlOption retorna null para chave ausente' {
     Assert-True ($null -eq (Get-TomlOption -Path $f -Key 'chave-que-nao-existe')) 'deveria ser null'
 }
 
+It 'config local explicita os caminhos de NAT traversal' {
+    $local = Import-RustDeskConfigFile -Path (Join-Path $repoRaiz 'config\local.psd1')
+    foreach ($chave in 'enable-tcp-punch', 'enable-udp-punch', 'enable-ipv6-punch') {
+        Assert-Equal 'Y' $local[$chave] "$chave deveria estar habilitado"
+    }
+    Assert-Equal 'N' $local['disable-udp'] 'UDP nao deveria estar desabilitado'
+    Assert-Equal 'N' $local['allow-insecure-tls-fallback'] 'fallback TLS inseguro deveria estar desabilitado'
+}
+
 It 'arquivo inexistente e reportado, nao explode' {
     $r = Set-TomlOption -Path (Join-Path ([System.IO.Path]::GetTempPath()) 'nao-existe-xyz.toml') `
                         -Options @{ 'enable-terminal' = 'Y' }
