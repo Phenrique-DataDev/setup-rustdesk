@@ -21,3 +21,6 @@ desktop.ini
 
 # Cache local de ferramenta, nao e do projeto
 .impeccable/
+
+# Clones de projetos de terceiros, so para estudo
+externos/
