@@ -128,6 +128,7 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\scripts\Get-PowerDiagnostics.ps1` | Coleta o estado de energia num relatório. Não altera nada. | não\*\* |
 | `.\scripts\Show-NetworkCheck.ps1` | Página no navegador com o botão *Verificar rede*. Não altera nada. | não |
+| `.\scripts\Enable-PrivacyMode.ps1 -PeerId <id>` | Liga o privacy mode para um host, sem clicar na barra. Roda na máquina que **controla**. | não |
 | [`docs/NETWORK-DIAGNOSTICS.md`](docs/NETWORK-DIAGNOSTICS.md) | Guia para gerar diagnóstico completo de rede, firewall e portas efêmeras. | não |
 | `.\scripts\Install-AwakeGuard.ps1 -Uninstall` | Remove o daemon de energia | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
@@ -315,6 +316,45 @@ e o diagnóstico passam a mostrar:
 
 Um DNS secundário não ajuda nos casos observados: as falhas de DNS nos logs coincidiam com a
 rede inteira caindo (`NetworkProfile` 10001), não com o servidor de DNS parado.
+
+### Privacy mode: quem pede, quem permite
+
+O privacy mode (a tela física do host fica preta durante a sessão) é **pedido pelo cliente**.
+Depois do primeiro quadro de vídeo, o cliente envia `TogglePrivacyMode{on: true}` ao host se a
+config do peer tiver `privacy_mode = true` (`send_toggle_privacy_mode_msg`, em
+`src/client/io_loop.rs`, conferido na 1.4.9). O botão da barra de ferramentas grava essa mesma
+chave e manda o pedido na hora.
+
+| Onde | Arquivo | Chave | Papel |
+|---|---|---|---|
+| Máquina que **controla** | `%APPDATA%\RustDesk\config\peers\<id>.toml` | `privacy_mode = true` (no topo, fora de seção) | Por peer. Prevalece sobre o padrão. |
+| Máquina que **controla** | `%APPDATA%\RustDesk\config\RustDesk_default.toml` | `[options]` `privacy_mode = 'Y'` | Padrão para peers que ainda não têm a chave. |
+| **Host** | `RustDesk2.toml` | `enable-privacy-mode` | Permissão. Só `N` bloqueia; ausente permite. |
+
+```powershell
+# na máquina que controla — vale a partir da próxima conexão ao peer
+.\scripts\Enable-PrivacyMode.ps1 -PeerId 123456789 -SetDefault
+.\scripts\Enable-PrivacyMode.ps1 -PeerId 123456789 -Disable     # desliga
+.\scripts\Enable-PrivacyMode.ps1 -PeerId 123456789 -WhatIf      # simula
+```
+
+O que o script **não** faz:
+
+- **Não muda uma sessão aberta.** O pedido sai uma vez, na abertura.
+- **Não roda com sessão aberta para o peer** (recusa; `-Force` ignora). O RustDesk regrava o
+  `peers\<id>.toml` ao fechar a sessão e sobrescreveria a edição.
+- **Não liga o modo a partir do host.** Quem manda o pedido é o cliente; configurar só o host
+  não tem efeito.
+
+A chave da documentação do RustDesk (`privacy-mode=Y`, com hífen) **não é a que o código lê**: o
+`UserDefaultConfig` lê `privacy_mode`, com underscore, e só `Y` liga. Com hífen a opção é
+ignorada em silêncio.
+
+Para ver se o pedido chegou, leia o log do serviço do host
+(`C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\log\server\`, exige
+Administrador). `Option update: ... privacy_mode: NotSet` na abertura significa que o cliente
+**não pediu**; `Change permission privacy_mode -> true/false` é só o interruptor de permissão do
+painel de conexão do host, não o modo ligado.
 
 ### Versão fixada e atualizações desligadas
 
@@ -1053,6 +1093,7 @@ scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
 scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
 scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
 scripts/Show-NetworkCheck.ps1   serve a página "Verificar rede" e roda as checagens
+scripts/Enable-PrivacyMode.ps1  liga o privacy mode de um peer (roda em quem controla)
 scripts/network-check.html      a página: botão, caixa de resultado, estilo
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
