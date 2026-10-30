@@ -113,6 +113,13 @@ afetam quem edita este repo:
   acesso — falso negativo silencioso. Tarefas do próprio usuário (como `HerdrServer`) são
   consultáveis sem elevação.
 - **O Herdr recarrega sem reiniciar** (`herdr server reload-config`), diferente do RustDesk.
+- **Privacy mode é pedido pelo cliente, não pelo host.** `Enable-PrivacyMode.ps1` roda na
+  máquina que **controla** e grava `privacy_mode = true` (chave de topo, sem seção) em
+  `peers\<id>.toml`; configurar o host não liga nada. A chave é `privacy_mode` com
+  underscore: o `privacy-mode` com hífen da documentação do RustDesk é ignorado em silêncio.
+  O host só bloqueia com `enable-privacy-mode = 'N'`. Não vale para sessão já aberta, e o app
+  regrava o `peers\<id>.toml` ao fechá-la (o script recusa com sessão aberta). Não confunda
+  `Change permission privacy_mode` do log do host (interruptor do painel) com o modo ligado.
 - **`powercfg /setacvalueindex` não vale nada sem `powercfg /setactive` depois.** O valor
   entra no esquema e o sistema segue no antigo, sem erro nenhum.
 - **Os rótulos do `powercfg` são traduzidos.** Nunca case contra `Setting Index`; localize os
