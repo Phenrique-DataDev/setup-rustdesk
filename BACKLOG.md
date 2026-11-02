@@ -25,6 +25,9 @@ hash SHA-256 e assinatura Authenticode. O README passou a documentar o workflow 
 com teste manual de `Win+L`; os itens 0, 1 e 2 continuam pendentes por falta da execução em
 uma máquina Windows zerada/notebook.
 
+Revisado em **2026-11-02**: o privacy mode virou padrão do `-All`. Entrou o item **10**, porque o
+recurso foi conferido no código e em testes, mas nunca numa sessão real.
+
 Ordenado por **risco de morder**, não por esforço.
 
 ---

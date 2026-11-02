@@ -33,7 +33,8 @@ cd setup-rustdesk
 ```
 
 O número de passos é calculado conforme as opções e o hardware: o passo de energia só aparece
-em notebook, e o passo da senha só aparece quando `-Password` é usado. Com a senha fornecida,
+em notebook, o da senha só aparece quando `-Password` é usado, e o do
+[privacy mode](#privacy-mode-ligado-por-padrão) sai com `-SkipPrivacy`. Com a senha fornecida,
 o setup termina sem passo manual pendente. Sem `-Password`, ele roda igual mas termina
 apontando que a senha falta — veja abaixo.
 
@@ -1216,8 +1217,9 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
 - **`$WhatIfPreference` não atravessa fronteira de módulo.** Uma função exportada de
   `lib/*.psm1` roda com o preference do escopo *dela*, não o do script que a chamou. Por
   isso `Set-RustDeskConfig.ps1 -WhatIf` chegou a **gravar de verdade** (e a parar o
-  serviço) enquanto imprimia uma simulação convincente na tela. Quem chama `Set-TomlOption`
-  ou `Set-TomlSectionValue` precisa repassar `-WhatIf:$WhatIfPreference` explicitamente, e
+  serviço) enquanto imprimia uma simulação convincente na tela. Quem chama `Set-TomlOption`,
+  `Set-TomlSectionValue` ou `Set-TomlTopLevelValue` precisa repassar
+  `-WhatIf:$WhatIfPreference` explicitamente, e
   efeitos colaterais fora do módulo (parar/subir serviço) precisam de guarda própria. Há
   teste de regressão para as duas coisas.
 - **`IsInRole('Administrator')` com string falha em Windows localizado.** Em pt-BR o nome

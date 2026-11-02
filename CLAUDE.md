@@ -97,8 +97,11 @@ afetam quem edita este repo:
 - **O serviço do RustDesk não recarrega a config sozinho** e pode regravar por cima ao
   sair. Edite com ele parado, via `Stop-RustDeskClean` (que passa pelo SCM — `Stop-Process`
   dispara as recovery actions e ele volta em 5s).
-- **`$WhatIfPreference` não atravessa fronteira de módulo.** Ao chamar `Set-TomlOption` /
-  `Set-TomlSectionValue` de `lib/`, repasse `-WhatIf:$WhatIfPreference` **explicitamente** —
+- **Ler `.toml` com `Get-Content` sem `-Encoding` corrompe acento ao regravar.** No PowerShell
+  5.1 ele lê ANSI. O que grava lê por `Read-TomlLines`, em `lib/RustDeskToml.psm1`.
+- **`$WhatIfPreference` não atravessa fronteira de módulo.** Ao chamar `Set-TomlOption`,
+  `Set-TomlSectionValue` ou `Set-TomlTopLevelValue` de `lib/`, repasse
+  `-WhatIf:$WhatIfPreference` **explicitamente** —
   sem isso o `-WhatIf` imprime simulação e grava no disco. Efeito colateral fora do módulo
   (parar/subir serviço) precisa de guarda própria. Coberto por teste de regressão.
 - **`IsInRole('Administrator')` com string falha em Windows pt-BR.** Use `Test-Elevated`.
