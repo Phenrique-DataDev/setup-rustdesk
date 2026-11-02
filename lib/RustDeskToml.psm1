@@ -29,6 +29,21 @@ function Write-TomlFile {
     [System.IO.File]::WriteAllText($Path, $text, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Read-TomlLines {
+    <#
+    .SYNOPSIS
+        Le as linhas de um .toml como UTF-8, com ou sem BOM.
+
+    .DESCRIPTION
+        Get-Content sem -Encoding le como ANSI no Windows PowerShell 5.1, e a
+        regravacao em UTF-8 corrompia todo caractere nao ASCII - apelido ou
+        nome de usuario em peers\<id>.toml, por exemplo.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    return ,[System.IO.File]::ReadAllLines($Path, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Test-TomlBom {
     <#
     .SYNOPSIS
@@ -98,9 +113,9 @@ function Set-TomlOption {
 
     $original = [System.IO.File]::ReadAllText($Path)
 
-    # Get-Content descarta o BOM na leitura; e a regravacao que o tira do disco.
+    # A leitura descarta o BOM; e a regravacao que o tira do disco.
     $lines = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($l in @(Get-Content -LiteralPath $Path)) { [void]$lines.Add($l) }
+    foreach ($l in (Read-TomlLines -Path $Path)) { [void]$lines.Add($l) }
 
     # localiza a secao [options]
     $idx = -1
@@ -253,7 +268,7 @@ function Set-TomlSectionValue {
 
     $lines = New-Object 'System.Collections.Generic.List[string]'
     if ($existe) {
-        foreach ($l in @(Get-Content -LiteralPath $Path)) { [void]$lines.Add($l) }
+        foreach ($l in (Read-TomlLines -Path $Path)) { [void]$lines.Add($l) }
     } else {
         $actions += 'arquivo nao existe - sera criado'
     }
@@ -329,5 +344,88 @@ function Set-TomlSectionValue {
     }
 }
 
+function Set-TomlTopLevelValue {
+    <#
+    .SYNOPSIS
+        Garante uma chave de topo (fora de qualquer secao), preservando o
+        formato nativo (UTF-8 sem BOM, LF).
+
+    .DESCRIPTION
+        Existe porque chave de topo e de secao nao sao intercambiaveis: em
+        peers\<id>.toml, 'privacy_mode' so vale antes do primeiro [secao]. Uma
+        chave homonima dentro de uma secao nao e tocada.
+
+        O valor passa por ConvertTo-TomlLiteral: booleano entra cru.
+
+    .OUTPUTS
+        PSCustomObject com Path, Changed, BomRemoved, Actions e Missing.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)]$Value,
+        [switch]$NoBackup
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [PSCustomObject]@{
+            Path = $Path; Changed = $false; BomRemoved = $false
+            Actions = @('arquivo nao existe - nada a fazer'); Missing = $true
+        }
+    }
+
+    $actions    = @()
+    $bomRemoved = Test-TomlBom -Path $Path
+    if ($bomRemoved) { $actions += 'BOM UTF-8 detectado - removido na regravacao' }
+
+    $original = [System.IO.File]::ReadAllText($Path)
+    $lines    = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($l in (Read-TomlLines -Path $Path)) { [void]$lines.Add($l) }
+
+    # topo do arquivo = tudo antes do primeiro [secao]
+    $fimTopo = $lines.Count
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*\[[^\]]+\]\s*$') { $fimTopo = $i; break }
+    }
+
+    $newLine = "$Key = $(ConvertTo-TomlLiteral -Value $Value)"
+    $found   = -1
+    for ($i = 0; $i -lt $fimTopo; $i++) {
+        if ($lines[$i] -match "^\s*$([regex]::Escape($Key))\s*=") { $found = $i; break }
+    }
+
+    if ($found -ge 0) {
+        if ($lines[$found].Trim() -eq $newLine) { $actions += "ok (ja estava): $Key" }
+        else { $lines[$found] = $newLine; $actions += "atualizado: $Key" }
+    } else {
+        $ins = $fimTopo
+        while ($ins -gt 0 -and $lines[$ins - 1].Trim() -eq '') { $ins-- }
+        $lines.Insert($ins, $newLine)
+        $actions += "inserido: $Key"
+    }
+
+    $newText = ($lines.ToArray() -join "`n") + "`n"
+    $changed = ($newText -ne $original)
+
+    if ($changed) {
+        if ($PSCmdlet.ShouldProcess($Path, "gravar $newLine")) {
+            if (-not $NoBackup) {
+                Copy-Item -LiteralPath $Path -Destination "$Path.bak" -Force
+                $actions += "backup: $Path.bak"
+            }
+            Write-TomlFile -Path $Path -Lines $lines.ToArray()
+        }
+    } else {
+        $actions += 'nenhuma alteracao necessaria - arquivo intacto'
+    }
+
+    return [PSCustomObject]@{
+        Path = $Path; Changed = $changed; BomRemoved = $bomRemoved
+        Actions = $actions; Missing = $false
+    }
+}
+
 Export-ModuleMember -Function Write-TomlFile, Test-TomlBom, Get-TomlOption, Set-TomlOption, `
-                              ConvertTo-TomlLiteral, Get-TomlSectionValue, Set-TomlSectionValue
+                              ConvertTo-TomlLiteral, Get-TomlSectionValue, Set-TomlSectionValue, `
+                              Set-TomlTopLevelValue

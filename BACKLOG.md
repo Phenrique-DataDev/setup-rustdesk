@@ -436,6 +436,21 @@ issue resolveria isso, e continua sendo a saída se o aviso passar a chegar tard
 
 ---
 
+## 10. O privacy mode por padrão nunca rodou de ponta a ponta
+
+Escrito em 2026-11-02. O padrão entrou lendo o código da 1.5.0 e o log de um cliente real, que
+confirmou o host anunciando *Mode 1* e *Mode 2*. Foi testado contra um `APPDATA` falso e com
+`-WhatIf` na config real, nunca numa sessão.
+
+| O quê | Por que importa |
+|---|---|
+| Conectar de uma máquina com `-Privacy` aplicado: a tela física apaga sozinha? | É o objetivo do recurso. |
+| A barra mostra *Mode 1* marcado e desliga o modo | É o motivo de gravar `privacy-mode-impl-key`. |
+| Conectar com o host **bloqueado** (`Win+L`) e com **ninguém logado** | É o cenário central do repo. Sem usuário logado o código aponta falha ao abrir, que gravaria `privacy_mode = false`. |
+| `Ctrl+P` na máquina e queda de rede no meio da sessão | Teclado e mouse físicos ficam bloqueados; o host precisa soltar ao fechar. |
+
+---
+
 ## Ideias, não compromissos
 
 - ~~O repositório virou público sem LICENSE.~~ **Feito em 2026-08-11**: sem arquivo de

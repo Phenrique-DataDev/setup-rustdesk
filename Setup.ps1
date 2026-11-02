@@ -14,7 +14,8 @@
 .EXAMPLE
     .\Setup.ps1 -All
     Instala e configura o RustDesk, instala o watchdog, instala e configura o
-    Herdr com o servidor subindo no logon, e verifica. Exige Administrador.
+    Herdr com o servidor subindo no logon, deixa o privacy mode ligado por
+    padrao nas conexoes que partem desta maquina, e verifica. Exige Administrador.
 
 .EXAMPLE
     .\Setup.ps1 -All -Password (Read-Host -AsSecureString 'senha')
@@ -36,6 +37,11 @@
     So a metade Herdr: instala, configura e poe o servidor no logon.
     NAO precisa de Administrador.
 
+.EXAMPLE
+    .\Setup.ps1 -Privacy
+    So o privacy mode: liga como padrao para os peers desta maquina (a que
+    controla). NAO precisa de Administrador.
+
 .LINK
     README.md
 #>
@@ -48,6 +54,8 @@ param(
     [switch]$Power,
     [switch]$SkipPower,
     [switch]$Herdr,
+    [switch]$Privacy,
+    [switch]$SkipPrivacy,
     [switch]$Test,
     [string]$ConfigFile,
     [string]$HerdrConfigFile,
@@ -67,15 +75,16 @@ Import-Module (Join-Path $PSScriptRoot 'lib\RustDeskCommon.psm1') -Force
 
 if ($All) {
     $Install = $Configure = $Watchdog = $Herdr = $Test = $true
+    $Privacy = -not $SkipPrivacy
     # Energia so entra em portatil. Em desktop nao ha tampa nem bateria para
     # tratar, e mexer no plano de energia de graca seria efeito colateral.
     $Power = (Test-IsLaptop) -and -not $SkipPower
 }
 
 # nada pedido: so verifica, que e a acao segura
-if (-not ($Install -or $Configure -or $Watchdog -or $Power -or $Herdr -or $Test)) { $Test = $true }
+if (-not ($Install -or $Configure -or $Watchdog -or $Power -or $Herdr -or $Privacy -or $Test)) { $Test = $true }
 
-# o passo do Herdr fica de fora: ele mora no perfil do usuario e nao eleva
+# Herdr e privacy mode ficam de fora: moram no perfil do usuario e nao elevam
 $precisaAdmin = $Install -or $Configure -or $Watchdog -or $Power
 if ($precisaAdmin -and -not (Test-Elevated)) {
     Write-Host ''
@@ -90,7 +99,7 @@ if ($precisaAdmin -and -not (Test-Elevated)) {
 # A numeracao era literal ('1/5'...'6/6') e passou a mentir assim que o passo de
 # energia virou condicional. Contar antes e o unico jeito de o titulo bater com o
 # que vai rodar de fato.
-$totalPassos = @($Install, $Configure, $Watchdog, $Power, $Herdr, [bool]$Password, $Test |
+$totalPassos = @($Install, $Configure, $Watchdog, $Power, $Herdr, $Privacy, [bool]$Password, $Test |
                  Where-Object { $_ }).Count
 $passoAtual  = 0
 
@@ -140,6 +149,13 @@ if ($Herdr) {
     $p = @{}
     if ($HerdrConfigFile) { $p['ConfigFile'] = $HerdrConfigFile }
     & (Join-Path $PSScriptRoot 'scripts\Set-HerdrConfig.ps1') @p
+}
+
+# Privacy mode e pedido por quem conecta, entao este passo mexe na config de
+# CLIENTE desta maquina. A permissao do lado do host vem do -Configure.
+if ($Privacy) {
+    Write-Passo 'Ligando o privacy mode por padrao (conexoes que partem daqui)'
+    & (Join-Path $PSScriptRoot 'scripts\Enable-PrivacyMode.ps1')
 }
 
 # A senha permanente era o unico passo que -All nao fechava, e numa maquina
