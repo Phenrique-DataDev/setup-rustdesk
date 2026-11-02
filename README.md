@@ -33,7 +33,8 @@ cd setup-rustdesk
 ```
 
 O número de passos é calculado conforme as opções e o hardware: o passo de energia só aparece
-em notebook, e o passo da senha só aparece quando `-Password` é usado. Com a senha fornecida,
+em notebook, o da senha só aparece quando `-Password` é usado, e o do
+[privacy mode](#privacy-mode-ligado-por-padrão) sai com `-SkipPrivacy`. Com a senha fornecida,
 o setup termina sem passo manual pendente. Sem `-Password`, ele roda igual mas termina
 apontando que a senha falta — veja abaixo.
 
@@ -119,16 +120,17 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | Comando | O que faz | Admin |
 |---|---|---|
 | `.\Setup.ps1` | Só verifica. Não altera nada. | não |
-| `.\Setup.ps1 -All` | RustDesk + watchdog + energia* + Herdr + verifica | **sim** |
+| `.\Setup.ps1 -All` | RustDesk + watchdog + energia* + Herdr + privacy mode + verifica | **sim** |
 | `.\Setup.ps1 -Install` | Instala o RustDesk e registra o serviço | **sim** |
 | `.\Setup.ps1 -Configure` | Reaplica as opções nas duas configs do RustDesk | **sim** |
 | `.\Setup.ps1 -Watchdog` | Instala o watchdog e a tarefa agendada | **sim** |
 | `.\Setup.ps1 -Power` | Energia para notebook: tampa, suspensão, rede, daemon | **sim** |
 | `.\Setup.ps1 -Herdr` | Instala o Herdr, aplica a config e põe o servidor no logon | não |
+| `.\Setup.ps1 -Privacy` | Liga o privacy mode por padrão nas conexões que partem desta máquina | não |
 | `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\scripts\Get-PowerDiagnostics.ps1` | Coleta o estado de energia num relatório. Não altera nada. | não\*\* |
 | `.\scripts\Show-NetworkCheck.ps1` | Página no navegador com o botão *Verificar rede*. Não altera nada. | não |
-| `.\scripts\Enable-PrivacyMode.ps1 -PeerId <id>` | Liga o privacy mode para um host, sem clicar na barra. Roda na máquina que **controla**. | não |
+| `.\scripts\Enable-PrivacyMode.ps1 -PeerId <id>` | Liga o privacy mode só para um host. Roda na máquina que **controla**. | não |
 | [`docs/NETWORK-DIAGNOSTICS.md`](docs/NETWORK-DIAGNOSTICS.md) | Guia para gerar diagnóstico completo de rede, firewall e portas efêmeras. | não |
 | `.\scripts\Install-AwakeGuard.ps1 -Uninstall` | Remove o daemon de energia | **sim** |
 | `.\Setup.ps1 -Test -ShowLogs` | Verifica e mostra os logs recentes | não* |
@@ -146,7 +148,7 @@ ilegíveis — ele avisa em vez de reportar ausência como se fosse fato.
 `[AVISO] requer Administrador` — o diretório é protegido. A parte do Herdr mora no perfil
 do usuário e é verificada por completo sem elevação.
 
-Opções úteis: `-IntervalMinutes 5` (frequência do watchdog), `-SkipPower`, `-ConfigFile caminho.psd1`
+Opções úteis: `-IntervalMinutes 5` (frequência do watchdog), `-SkipPower`, `-SkipPrivacy`, `-ConfigFile caminho.psd1`
 (RustDesk), `-HerdrConfigFile caminho.psd1`, `-SkipHerdrInstall` (só configura um Herdr já
 instalado), `-StartupTimeoutSeconds 30` (prazo para confirmar o servidor do Herdr) e
 `-StartupPollMilliseconds 500` (intervalo entre consultas durante essa confirmação).
@@ -317,34 +319,65 @@ e o diagnóstico passam a mostrar:
 Um DNS secundário não ajuda nos casos observados: as falhas de DNS nos logs coincidiam com a
 rede inteira caindo (`NetworkProfile` 10001), não com o servidor de DNS parado.
 
-### Privacy mode: quem pede, quem permite
+### Privacy mode: ligado por padrão
 
 O privacy mode (a tela física do host fica preta durante a sessão) é **pedido pelo cliente**.
-Depois do primeiro quadro de vídeo, o cliente envia `TogglePrivacyMode{on: true}` ao host se a
-config do peer tiver `privacy_mode = true` (`send_toggle_privacy_mode_msg`, em
-`src/client/io_loop.rs`, conferido na 1.4.9). O botão da barra de ferramentas grava essa mesma
-chave e manda o pedido na hora.
+Depois do primeiro quadro de vídeo, o cliente envia `TogglePrivacyMode{on: true, impl_key}` ao
+host se a config do peer tiver `privacy_mode = true` (`send_toggle_privacy_mode_msg`, em
+`src/client/io_loop.rs`, conferido na 1.5.0). **Nenhuma opção do host liga o modo sozinha**,
+então ser padrão deste projeto exige configurar os dois lados:
 
-| Onde | Arquivo | Chave | Papel |
-|---|---|---|---|
-| Máquina que **controla** | `%APPDATA%\RustDesk\config\peers\<id>.toml` | `privacy_mode = true` (no topo, fora de seção) | Por peer. Prevalece sobre o padrão. |
-| Máquina que **controla** | `%APPDATA%\RustDesk\config\RustDesk_default.toml` | `[options]` `privacy_mode = 'Y'` | Padrão para peers que ainda não têm a chave. |
-| **Host** | `RustDesk2.toml` | `enable-privacy-mode` | Permissão. Só `N` bloqueia; ausente permite. |
+| Onde | Arquivo | Chave | Papel | Quem grava |
+|---|---|---|---|---|
+| **Host** | `RustDesk2.toml` | `enable-privacy-mode = 'Y'` | Permissão. Ausente também permite; só `N` bloqueia. | `-Configure` |
+| Máquina que **controla** | `%APPDATA%\RustDesk\config\RustDesk_default.toml` | `[options]` `privacy_mode = 'Y'` | Padrão para peers **sem** a chave. | `-Privacy` |
+| Máquina que **controla** | `%APPDATA%\RustDesk\config\peers\<id>.toml` | `privacy_mode = true` (no topo, fora de seção) | Por peer. Prevalece sobre o padrão. | `-Privacy` |
+| Máquina que **controla** | o mesmo `peers\<id>.toml` | `[options]` `privacy-mode-impl-key` | Qual modo pedir: `privacy_mode_impl_exclude_from_capture`. | `-Privacy` |
+
+`.\Setup.ps1 -All` já faz tudo isso; `-SkipPrivacy` deixa o passo de cliente de fora. Só a
+parte do cliente, sem Administrador:
 
 ```powershell
-# na máquina que controla — vale a partir da próxima conexão ao peer
-.\scripts\Enable-PrivacyMode.ps1 -PeerId 123456789 -SetDefault
-.\scripts\Enable-PrivacyMode.ps1 -PeerId 123456789 -Disable     # desliga
-.\scripts\Enable-PrivacyMode.ps1 -PeerId 123456789 -WhatIf      # simula
+.\Setup.ps1 -Privacy                                   # padrão + todos os peers conhecidos
+.\scripts\Enable-PrivacyMode.ps1 -WhatIf               # simula
+.\scripts\Enable-PrivacyMode.ps1 -PeerId 123456789     # só um peer
+.\scripts\Enable-PrivacyMode.ps1 -Disable              # desliga padrão e peers
 ```
 
-O que o script **não** faz:
+Num **celular** ou em outra máquina sem este repo, o mesmo padrão fica na interface: *Display >
+Other default options > Privacy mode*. Peer que já conectou não é afetado por ela (ver abaixo).
 
-- **Não muda uma sessão aberta.** O pedido sai uma vez, na abertura.
-- **Não roda com sessão aberta para o peer** (recusa; `-Force` ignora). O RustDesk regrava o
-  `peers\<id>.toml` ao fechar a sessão e sobrescreveria a edição.
-- **Não liga o modo a partir do host.** Quem manda o pedido é o cliente; configurar só o host
-  não tem efeito.
+**Por que três chaves no cliente, e não só o padrão:**
+
+- **O padrão só vale para peer sem a chave.** Toda sessão grava `privacy_mode` no
+  `peers\<id>.toml`, normalmente `false`. Um peer que já conectou nunca volta a ler o padrão,
+  por isso o script grava também nos peers conhecidos.
+- **Sem `privacy-mode-impl-key` o cliente pede com chave vazia.** O host usa o modo padrão dele,
+  mas devolve a chave vazia, e o cliente salva `privacy_mode_impl_mag`. Num host com *Mode 1* e
+  *Mode 2* a barra só marca o item cuja chave bate: nenhum aparece ligado e o modo não desliga por
+  ali. Por isso a primeira sessão de um peer **novo** deixa essa chave errada, e vale rodar
+  `-Privacy` de novo depois dela.
+
+**Por que o Mode 1:** ele não usa driver e é o padrão do RustDesk do Windows 10 2004 em diante. O
+Mode 2 troca a topologia de vídeo por um monitor virtual. Host sem essa chave, como um macOS, cai
+no modo padrão dele.
+
+**O que muda com o modo ligado:**
+
+- **Teclado e mouse físicos do host ficam bloqueados.** `Ctrl+P`, na própria máquina, desliga o
+  modo; o host também o desfaz ao fechar a conexão.
+- **Uma segunda sessão de área de trabalho é recusada** (*Someone turns on privacy mode, exit*).
+  Terminal, transferência de arquivos e túnel seguem entrando.
+- **Sessão só de Terminal não liga o modo:** o pedido sai no primeiro quadro de vídeo.
+
+**O padrão não se defende sozinho.** Qualquer recusa grava `privacy_mode = false` no peer: host
+sem permissão, falha ao abrir (por exemplo, sem ninguém logado no host) ou desligar pela barra. A
+partir daí aquele peer não pede mais, e o padrão não o recupera. A verificação conta os peers
+nesse estado; `.\Setup.ps1 -Privacy` religa.
+
+O script não muda uma sessão aberta: o pedido sai uma vez, na abertura. Ele pula o peer quando
+acha sessão aberta (`-Force` ignora), mas só enxerga as abertas por linha de comando; as abertas
+pela interface ficam no processo principal, sem o ID na linha de comando. Feche a sessão antes.
 
 A chave da documentação do RustDesk (`privacy-mode=Y`, com hífen) **não é a que o código lê**: o
 `UserDefaultConfig` lê `privacy_mode`, com underscore, e só `Y` liga. Com hífen a opção é
@@ -1093,7 +1126,7 @@ scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
 scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
 scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
 scripts/Show-NetworkCheck.ps1   serve a página "Verificar rede" e roda as checagens
-scripts/Enable-PrivacyMode.ps1  liga o privacy mode de um peer (roda em quem controla)
+scripts/Enable-PrivacyMode.ps1  liga o privacy mode por padrão (roda em quem controla)
 scripts/network-check.html      a página: botão, caixa de resultado, estilo
 scripts/Test-RustDeskSetup.ps1  verificação (PASS/FALHA/AVISO, exit 1 se falhar)
 scripts/watchdog/               template do watchdog
@@ -1184,8 +1217,9 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
 - **`$WhatIfPreference` não atravessa fronteira de módulo.** Uma função exportada de
   `lib/*.psm1` roda com o preference do escopo *dela*, não o do script que a chamou. Por
   isso `Set-RustDeskConfig.ps1 -WhatIf` chegou a **gravar de verdade** (e a parar o
-  serviço) enquanto imprimia uma simulação convincente na tela. Quem chama `Set-TomlOption`
-  ou `Set-TomlSectionValue` precisa repassar `-WhatIf:$WhatIfPreference` explicitamente, e
+  serviço) enquanto imprimia uma simulação convincente na tela. Quem chama `Set-TomlOption`,
+  `Set-TomlSectionValue` ou `Set-TomlTopLevelValue` precisa repassar
+  `-WhatIf:$WhatIfPreference` explicitamente, e
   efeitos colaterais fora do módulo (parar/subir serviço) precisam de guarda própria. Há
   teste de regressão para as duas coisas.
 - **`IsInRole('Administrator')` com string falha em Windows localizado.** Em pt-BR o nome

@@ -73,6 +73,11 @@
     'enable-tunnel'                    = 'Y'
     'enable-remote-restart'            = 'Y'
 
+    # Permite que quem conecta peca o privacy mode. E so a permissao: quem liga
+    # e o cliente - veja scripts/Enable-PrivacyMode.ps1, passo -Privacy do
+    # Setup.ps1. Explicito para a verificacao acusar um 'N' nesta maquina.
+    'enable-privacy-mode'              = 'Y'
+
     # --- seguranca ----------------------------------------------------
     # 'Y' deixa quem conecta alterar a configuracao desta maquina.
     # O default aqui e 'N'; mude com consciencia.

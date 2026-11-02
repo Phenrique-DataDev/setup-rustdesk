@@ -25,6 +25,9 @@ hash SHA-256 e assinatura Authenticode. O README passou a documentar o workflow 
 com teste manual de `Win+L`; os itens 0, 1 e 2 continuam pendentes por falta da execução em
 uma máquina Windows zerada/notebook.
 
+Revisado em **2026-11-02**: o privacy mode virou padrão do `-All`. Entrou o item **10**, porque o
+recurso foi conferido no código e em testes, mas nunca numa sessão real.
+
 Ordenado por **risco de morder**, não por esforço.
 
 ---
@@ -433,6 +436,21 @@ a ser condicional; o token só serve para escapar do rate limit, a release é p�
 **O limite conhecido:** o aviso só existe quando o CI roda, ou seja em PR, push na `main` e
 `workflow_dispatch`. Repositório parado por meses = ninguém vê. Foi aceito: um cron abrindo
 issue resolveria isso, e continua sendo a saída se o aviso passar a chegar tarde demais.
+
+---
+
+## 10. O privacy mode por padrão nunca rodou de ponta a ponta
+
+Escrito em 2026-11-02. O padrão entrou lendo o código da 1.5.0 e o log de um cliente real, que
+confirmou o host anunciando *Mode 1* e *Mode 2*. Foi testado contra um `APPDATA` falso e com
+`-WhatIf` na config real, nunca numa sessão.
+
+| O quê | Por que importa |
+|---|---|
+| Conectar de uma máquina com `-Privacy` aplicado: a tela física apaga sozinha? | É o objetivo do recurso. |
+| A barra mostra *Mode 1* marcado e desliga o modo | É o motivo de gravar `privacy-mode-impl-key`. |
+| Conectar com o host **bloqueado** (`Win+L`) e com **ninguém logado** | É o cenário central do repo. Sem usuário logado o código aponta falha ao abrir, que gravaria `privacy_mode = false`. |
+| `Ctrl+P` na máquina e queda de rede no meio da sessão | Teclado e mouse físicos ficam bloqueados; o host precisa soltar ao fechar. |
 
 ---
 

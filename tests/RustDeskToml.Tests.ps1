@@ -642,6 +642,160 @@ It 'config/power.psd1 tem as chaves que os scripts leem' {
         'KeepAwakePollSeconds precisa ser menor que StandbyIdleDC'
 }
 
+# --- chave de topo -----------------------------------------------------
+$peerToml = @(
+    "password = []"
+    "privacy_mode = false"
+    ""
+    "[options]"
+    "codec-preference = 'auto'"
+    ""
+    "[info]"
+    "username = 'Joao'"
+)
+
+It 'Set-TomlTopLevelValue atualiza a chave de topo com literal booleano' {
+    $f = New-TempToml -Lines $peerToml; $script:tmpFiles += $f
+    $r = Set-TomlTopLevelValue -Path $f -Key 'privacy_mode' -Value $true -NoBackup
+    Assert-True $r.Changed 'deveria ter mudado'
+    Assert-Equal 'privacy_mode = true' ([System.IO.File]::ReadAllLines($f)[1])
+}
+
+It 'Set-TomlTopLevelValue insere antes da primeira secao' {
+    $f = New-TempToml -Lines @("password = []", "", "[options]", "a = 'b'"); $script:tmpFiles += $f
+    $null = Set-TomlTopLevelValue -Path $f -Key 'privacy_mode' -Value $true -NoBackup
+    $l = [System.IO.File]::ReadAllLines($f)
+    Assert-Equal 'privacy_mode = true' $l[1]
+    Assert-Equal '[options]' $l[3]
+}
+
+It 'Set-TomlTopLevelValue nao confunde chave homonima dentro de secao' {
+    $f = New-TempToml -Lines @("password = []", "", "[options]", "privacy_mode = 'N'"); $script:tmpFiles += $f
+    $null = Set-TomlTopLevelValue -Path $f -Key 'privacy_mode' -Value $true -NoBackup
+    $txt = [System.IO.File]::ReadAllText($f)
+    Assert-True ($txt -match "privacy_mode = 'N'") 'mexeu na chave da secao'
+    Assert-True ($txt -match '(?m)^privacy_mode = true$') 'nao inseriu no topo'
+}
+
+It 'Set-TomlTopLevelValue e idempotente e nao gera backup sem mudanca' {
+    $f = New-TempToml -Lines $peerToml; $script:tmpFiles += $f
+    $null = Set-TomlTopLevelValue -Path $f -Key 'privacy_mode' -Value $true -NoBackup
+    $r = Set-TomlTopLevelValue -Path $f -Key 'privacy_mode' -Value $true
+    Assert-True (-not $r.Changed) 'segunda passada alterou'
+    Assert-True (-not (Test-Path -LiteralPath "$f.bak")) 'backup sem mudanca'
+}
+
+It 'Set-TomlTopLevelValue respeita -WhatIf' {
+    $f = New-TempToml -Lines $peerToml; $script:tmpFiles += $f
+    $antes = [System.IO.File]::ReadAllText($f)
+    $null = Set-TomlTopLevelValue -Path $f -Key 'privacy_mode' -Value $true -WhatIf
+    Assert-Equal $antes ([System.IO.File]::ReadAllText($f))
+    Assert-True (-not (Test-Path -LiteralPath "$f.bak")) 'WhatIf criou backup'
+}
+
+It 'a gravacao preserva acento: Get-Content leria ANSI no PowerShell 5.1' {
+    $nome = 'Jo' + [char]0x00E3 + 'o'
+    $f = New-TempToml -Lines @("privacy_mode = false", "", "[options]", "a = 'b'", "", "[info]", "username = '$nome'")
+    $script:tmpFiles += $f
+    $null = Set-TomlTopLevelValue -Path $f -Key 'privacy_mode' -Value $true -NoBackup
+    $null = Set-TomlOption -Path $f -Options @{ 'x' = 'y' } -NoBackup
+    $null = Set-TomlSectionValue -Path $f -Sections @{ options = @{ z = 'w' } } -NoBackup
+    $txt = [System.IO.File]::ReadAllText($f, (New-Object System.Text.UTF8Encoding($false)))
+    Assert-True ($txt.Contains($nome)) 'acento corrompido na regravacao'
+}
+
+# --- privacy mode ------------------------------------------------------
+$modoPrivado = 'privacy_mode_impl_exclude_from_capture'
+
+# APPDATA falso: o script nao pode encostar na config real de quem roda o teste.
+function New-FakeAppData {
+    param([string[]]$PeerIds)
+    $raiz  = Join-Path ([System.IO.Path]::GetTempPath()) ('appdata-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $peers = Join-Path $raiz 'RustDesk\config\peers'
+    New-Item -ItemType Directory -Path $peers -Force | Out-Null
+    foreach ($id in $PeerIds) {
+        $txt = ($peerToml -join "`n") + "`n"
+        [System.IO.File]::WriteAllText((Join-Path $peers "$id.toml"), $txt, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    return $raiz
+}
+
+function Invoke-ComAppData([string]$Raiz, [scriptblock]$Corpo) {
+    $original = $env:APPDATA
+    $env:APPDATA = $Raiz
+    try { & $Corpo 6>&1 | Out-Null } finally { $env:APPDATA = $original }
+}
+
+$scriptPrivacy = Join-Path $repoRaiz 'scripts\Enable-PrivacyMode.ps1'
+
+It 'config/default.psd1 permite o privacy mode no host' {
+    $op = Import-RustDeskConfigFile -Path (Join-Path $repoRaiz 'config\default.psd1')
+    Assert-Equal 'Y' $op['enable-privacy-mode']
+}
+
+It 'Enable-PrivacyMode sem -PeerId liga o padrao e todos os peers conhecidos' {
+    $raiz = New-FakeAppData -PeerIds @('111', '222')
+    try {
+        Invoke-ComAppData $raiz { & $scriptPrivacy }
+        $cfg = Join-Path $raiz 'RustDesk\config'
+        foreach ($id in '111', '222') {
+            $p = Join-Path $cfg "peers\$id.toml"
+            Assert-Equal 'true' (Get-TomlOption -Path $p -Key 'privacy_mode') "peer $id"
+            Assert-Equal $modoPrivado (Get-TomlOption -Path $p -Key 'privacy-mode-impl-key') "peer $id"
+        }
+        Assert-Equal '"Y"' (Get-TomlSectionValue -Path (Join-Path $cfg 'RustDesk_default.toml') -Section 'options' -Key 'privacy_mode')
+    } finally { Remove-Item $raiz -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Enable-PrivacyMode funciona numa maquina sem peers nem config' {
+    $raiz = Join-Path ([System.IO.Path]::GetTempPath()) ('appdata-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $raiz | Out-Null
+    try {
+        Invoke-ComAppData $raiz { & $scriptPrivacy }
+        Assert-True (Test-Path -LiteralPath (Join-Path $raiz 'RustDesk\config\RustDesk_default.toml')) 'padrao nao criado'
+    } finally { Remove-Item $raiz -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Enable-PrivacyMode -WhatIf nao grava nada' {
+    $raiz = New-FakeAppData -PeerIds @('111')
+    try {
+        $p = Join-Path $raiz 'RustDesk\config\peers\111.toml'
+        $antes = [System.IO.File]::ReadAllText($p)
+        Invoke-ComAppData $raiz { & $scriptPrivacy -WhatIf }
+        Assert-Equal $antes ([System.IO.File]::ReadAllText($p))
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $raiz 'RustDesk\config\RustDesk_default.toml'))) 'WhatIf criou o padrao'
+        Assert-True (-not (Test-Path -LiteralPath "$p.bak")) 'WhatIf criou backup'
+    } finally { Remove-Item $raiz -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Enable-PrivacyMode -PeerId nao mexe nos outros peers nem no padrao' {
+    $raiz = New-FakeAppData -PeerIds @('111', '222')
+    try {
+        Invoke-ComAppData $raiz { & $scriptPrivacy -PeerId '111' }
+        $cfg = Join-Path $raiz 'RustDesk\config'
+        Assert-Equal 'true'  (Get-TomlOption -Path (Join-Path $cfg 'peers\111.toml') -Key 'privacy_mode')
+        Assert-Equal 'false' (Get-TomlOption -Path (Join-Path $cfg 'peers\222.toml') -Key 'privacy_mode')
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $cfg 'RustDesk_default.toml'))) 'gravou o padrao'
+    } finally { Remove-Item $raiz -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Enable-PrivacyMode -Disable desliga o padrao e os peers' {
+    $raiz = New-FakeAppData -PeerIds @('111')
+    try {
+        Invoke-ComAppData $raiz { & $scriptPrivacy; & $scriptPrivacy -Disable }
+        $cfg = Join-Path $raiz 'RustDesk\config'
+        Assert-Equal 'false' (Get-TomlOption -Path (Join-Path $cfg 'peers\111.toml') -Key 'privacy_mode')
+        Assert-Equal '"N"' (Get-TomlSectionValue -Path (Join-Path $cfg 'RustDesk_default.toml') -Section 'options' -Key 'privacy_mode')
+    } finally { Remove-Item $raiz -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Setup.ps1 -All liga o privacy mode e -SkipPrivacy desliga o passo' {
+    $src = Get-Content -Raw -LiteralPath (Join-Path $repoRaiz 'Setup.ps1')
+    Assert-True ($src -match '\$Privacy = -not \$SkipPrivacy') 'o -All nao liga o passo'
+    Assert-True ($src -match 'Enable-PrivacyMode\.ps1') 'o passo nao chama o script'
+    Assert-True ($src -match '\$Herdr, \$Privacy, \[bool\]\$Password') 'o passo fica fora da contagem'
+}
+
 # limpeza
 $tmpFiles | Sort-Object -Unique | ForEach-Object { Remove-Item $_ -Force -ErrorAction SilentlyContinue }
 

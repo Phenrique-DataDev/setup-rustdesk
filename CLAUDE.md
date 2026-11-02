@@ -16,8 +16,8 @@ PowerShell **como Administrador**:
 ```
 
 Ele instala o RustDesk → aplica as duas configs → watchdog → **energia, se for notebook** →
-instala e configura o Herdr com o servidor no logon → grava a senha permanente → verifica. Ao
-final a máquina está pronta, sem passo manual pendente.
+instala e configura o Herdr com o servidor no logon → **privacy mode por padrão** → grava a
+senha permanente → verifica. Ao final a máquina está pronta, sem passo manual pendente.
 
 O número de passos é **calculado**, não literal: o de energia é condicional. Se acrescentar um
 passo, não volte a escrever `'3/5'` na mão.
@@ -51,7 +51,8 @@ mensagem. Não tente contornar editando `RustDesk.toml`: ele guarda hash e salt.
   exigem Administrador e mexem em serviço, configs e plano de energia.
   `Get-PowerDiagnostics.ps1` é somente leitura e pode rodar à vontade.
 - **`-WhatIf` funciona** em `Set-RustDeskConfig.ps1`, `Set-HerdrConfig.ps1`,
-  `Install-Herdr.ps1`, `Set-PowerConfig.ps1` e `Install-AwakeGuard.ps1`. Use para mostrar o
+  `Install-Herdr.ps1`, `Set-PowerConfig.ps1`, `Install-AwakeGuard.ps1` e
+  `Enable-PrivacyMode.ps1`. Use para mostrar o
   efeito antes de aplicar.
 - **Energia só existe em notebook.** `Test-IsLaptop` decide; em desktop o passo é pulado e a
   seção de energia nem aparece na verificação. Não force o passo numa máquina sem bateria
@@ -96,8 +97,11 @@ afetam quem edita este repo:
 - **O serviço do RustDesk não recarrega a config sozinho** e pode regravar por cima ao
   sair. Edite com ele parado, via `Stop-RustDeskClean` (que passa pelo SCM — `Stop-Process`
   dispara as recovery actions e ele volta em 5s).
-- **`$WhatIfPreference` não atravessa fronteira de módulo.** Ao chamar `Set-TomlOption` /
-  `Set-TomlSectionValue` de `lib/`, repasse `-WhatIf:$WhatIfPreference` **explicitamente** —
+- **Ler `.toml` com `Get-Content` sem `-Encoding` corrompe acento ao regravar.** No PowerShell
+  5.1 ele lê ANSI. O que grava lê por `Read-TomlLines`, em `lib/RustDeskToml.psm1`.
+- **`$WhatIfPreference` não atravessa fronteira de módulo.** Ao chamar `Set-TomlOption`,
+  `Set-TomlSectionValue` ou `Set-TomlTopLevelValue` de `lib/`, repasse
+  `-WhatIf:$WhatIfPreference` **explicitamente** —
   sem isso o `-WhatIf` imprime simulação e grava no disco. Efeito colateral fora do módulo
   (parar/subir serviço) precisa de guarda própria. Coberto por teste de regressão.
 - **`IsInRole('Administrator')` com string falha em Windows pt-BR.** Use `Test-Elevated`.
@@ -113,13 +117,19 @@ afetam quem edita este repo:
   acesso — falso negativo silencioso. Tarefas do próprio usuário (como `HerdrServer`) são
   consultáveis sem elevação.
 - **O Herdr recarrega sem reiniciar** (`herdr server reload-config`), diferente do RustDesk.
-- **Privacy mode é pedido pelo cliente, não pelo host.** `Enable-PrivacyMode.ps1` roda na
-  máquina que **controla** e grava `privacy_mode = true` (chave de topo, sem seção) em
-  `peers\<id>.toml`; configurar o host não liga nada. A chave é `privacy_mode` com
-  underscore: o `privacy-mode` com hífen da documentação do RustDesk é ignorado em silêncio.
-  O host só bloqueia com `enable-privacy-mode = 'N'`. Não vale para sessão já aberta, e o app
-  regrava o `peers\<id>.toml` ao fechá-la (o script recusa com sessão aberta). Não confunda
-  `Change permission privacy_mode` do log do host (interruptor do painel) com o modo ligado.
+- **Privacy mode é pedido pelo cliente, não pelo host.** Não existe opção de host que o ligue:
+  `enable-privacy-mode` é só permissão. O padrão do projeto é `Setup.ps1 -Privacy`
+  (`Enable-PrivacyMode.ps1`, sem `-PeerId`), que roda na máquina que **controla** e grava
+  `RustDesk_default.toml` **e** os `peers\<id>.toml`. Só o padrão não basta: toda sessão grava
+  `privacy_mode` no peer, e chave presente ignora o padrão. Só `privacy_mode = true` também não
+  basta: sem `privacy-mode-impl-key` o cliente salva `_mag` e a barra deixa de desligar o modo num
+  host com Mode 1 e Mode 2. A chave é `privacy_mode` com underscore; o `privacy-mode` com hífen da
+  documentação do RustDesk é ignorado em silêncio.
+- **Qualquer recusa do privacy mode grava `privacy_mode = false` no peer**, e fica assim até rodar
+  `-Privacy` de novo. A guarda de sessão aberta só vê sessão por linha de comando; as abertas pela
+  UI vivem no processo principal. Com o modo ligado o host bloqueia teclado e mouse físicos e
+  recusa outra sessão de área de trabalho. Não confunda `Change permission privacy_mode` do log do
+  host (interruptor do painel) com o modo ligado.
 - **`powercfg /setacvalueindex` não vale nada sem `powercfg /setactive` depois.** O valor
   entra no esquema e o sistema segue no antigo, sem erro nenhum.
 - **Os rótulos do `powercfg` são traduzidos.** Nunca case contra `Setting Index`; localize os

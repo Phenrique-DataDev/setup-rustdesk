@@ -227,6 +227,33 @@ if (Test-Path -LiteralPath $localFile) {
     }
 }
 
+# --- privacy mode ------------------------------------------------------
+# A permissao do host ja entrou na comparacao das opcoes acima. Aqui fica o que
+# aquela comparacao nao ve. E AVISO, nunca FALHA: -SkipPrivacy e escolha valida,
+# e nada disto impede o acesso remoto.
+Write-Host ''
+Write-Host 'Privacy mode' -ForegroundColor Cyan
+if ($paths.Installed) {
+    # Sem a DLL o host responde falha, e o cliente grava privacy_mode = false.
+    $dll = Join-Path (Split-Path -Parent $paths.Exe) 'WindowInjection.dll'
+    Test-Item 'host: WindowInjection.dll presente' $(if (Test-Path -LiteralPath $dll) { $true } else { 'aviso' }) `
+        $(if (-not (Test-Path -LiteralPath $dll)) { 'sem ela o host recusa o privacy mode' } else { '' })
+}
+$pmDefault = Join-Path $paths.UserConfigDir 'RustDesk_default.toml'
+$pmValor   = Get-TomlOption -Path $pmDefault -Key 'privacy_mode'
+Test-Item 'cliente: padrao para peers novos' $(if ($pmValor -match '^"?Y"?$') { $true } else { 'aviso' }) `
+    $(if ($pmValor -notmatch '^"?Y"?$') { 'desligado. Rode .\Setup.ps1 -Privacy nas maquinas que controlam' } else { '' })
+
+# Conta em vez de listar: esta saida e colada em issue, e o ID do peer nao vai junto.
+$pmDir = Join-Path $paths.UserConfigDir 'peers'
+$pmPeers = @(if (Test-Path -LiteralPath $pmDir) { Get-ChildItem -LiteralPath $pmDir -Filter '*.toml' -File })
+if ($pmPeers.Count -gt 0) {
+    $pmDesligados = @($pmPeers | Where-Object { (Get-TomlOption -Path $_.FullName -Key 'privacy_mode') -ne 'true' })
+    Test-Item "cliente: privacy mode ligado nos peers conhecidos ($($pmPeers.Count))" `
+        $(if ($pmDesligados.Count -eq 0) { $true } else { 'aviso' }) `
+        $(if ($pmDesligados.Count -gt 0) { "$($pmDesligados.Count) desligado(s): pedido recusado ou desligado na barra grava false. .\Setup.ps1 -Privacy religa" } else { '' })
+}
+
 # --- senha permanente --------------------------------------------------
 # Quem autentica com a tela bloqueada e o servico. Sem senha gravada no perfil
 # dele, a conexao bloqueada falha mesmo com todas as opcoes corretas.
