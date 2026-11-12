@@ -25,6 +25,11 @@ hash SHA-256 e assinatura Authenticode. O README passou a documentar o workflow 
 com teste manual de `Win+L`; os itens 0, 1 e 2 continuam pendentes por falta da execução em
 uma máquina Windows zerada/notebook.
 
+Revisado em **2026-11-12**: o pin do RustDesk subiu para **1.5.3** (release de 2026-11-09) após
+conferência do MSI, hash SHA-256 e assinatura Authenticode. A máquina de referência **continua
+na 1.5.0**: atualizar exige Administrador e derruba a sessão em curso. O `actions/checkout` do CI
+já estava na última (`v7.0.1`).
+
 Revisado em **2026-11-02**: o privacy mode virou padrão do `-All`. Entrou o item **10**, porque o
 recurso foi conferido no código e em testes, mas nunca numa sessão real.
 

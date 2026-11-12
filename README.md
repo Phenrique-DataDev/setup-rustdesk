@@ -392,8 +392,8 @@ painel de conexão do host, não o modo ligado.
 
 ### Versão fixada e atualizações desligadas
 
-A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.5.0` (última estável em
-2026-10-18). Sem pin, duas máquinas montadas com este repo em semanas diferentes acabam em
+A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.5.3` (última estável em
+2026-11-12). Sem pin, duas máquinas montadas com este repo em semanas diferentes acabam em
 versões diferentes — o oposto de *clonou, pediu, funciona*.
 
 O instalador baixa o `.msi` da release do GitHub e **só executa depois de duas conferências**:

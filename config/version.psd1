@@ -23,13 +23,13 @@
     ele tem precedencia e esta no .gitignore.
 #>
 @{
-    # Ultima estavel em 2026-10-18. Releases 'nightly' sao prerelease e ficam
+    # Ultima estavel em 2026-11-12. Releases 'nightly' sao prerelease e ficam
     # fora de proposito.
-    Version = '1.5.0'
+    Version = '1.5.3'
 
-    # SHA-256 do rustdesk-1.5.0-x86_64.msi publicado na release 1.5.0.
-    # Conferido no arquivo baixado em 2026-10-18 (26.345.472 bytes).
-    Sha256 = '624FE792AB1D76B35134DAB84BFF97A6BCD14043FFD090A2C6A2800F77580495'
+    # SHA-256 do rustdesk-1.5.3-x86_64.msi publicado na release 1.5.3.
+    # Conferido no arquivo baixado em 2026-11-12 (26.734.592 bytes).
+    Sha256 = '27F6BFB48A93D524860DD7F4A79E349BE14B6DC71295746CF132A060BA4869C8'
 
     # {0} = versao. O nome do arquivo segue o mesmo padrao em toda release.
     UrlTemplate = 'https://github.com/rustdesk/rustdesk/releases/download/{0}/rustdesk-{0}-x86_64.msi'
