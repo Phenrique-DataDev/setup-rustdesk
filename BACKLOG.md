@@ -30,6 +30,10 @@ conferência do MSI, hash SHA-256 e assinatura Authenticode. A máquina de refer
 na 1.5.0**: atualizar exige Administrador e derruba a sessão em curso. O `actions/checkout` do CI
 já estava na última (`v7.0.1`).
 
+Segunda revisão de **2026-11-12**: o passo de energia foi conferido num **notebook S3 real**. Saíram
+cinco defeitos, corrigidos, e o item **0** ganhou a lista do que passou a estar validado e do que
+segue manual (tampa, suspensão real, descarga, trigger de rede).
+
 Revisado em **2026-11-02**: o privacy mode virou padrão do `-All`. Entrou o item **10**, porque o
 recurso foi conferido no código e em testes, mas nunca numa sessão real.
 
@@ -102,6 +106,67 @@ Continua em aberto, agora com dado real:
   5.7.0.5115; vale testar um mais novo antes de mexer em propriedade.
 - Reinstalar `-Watchdog` e `-Power` no notebook para o trigger do 507 entrar, e ver no
   `watchdog.log` uma passada logo depois de sair da espera.
+
+**Revisado em 2026-11-12 — segundo notebook, o primeiro com S3, e o primeiro em que os scripts
+foram executados e conferidos na própria máquina** (Windows 11 Home 26300 pt-BR, Wi-Fi Intel
+Killer AX1650i, `powercfg /a` = S3 + Hibernar, sem espera moderna, Fast Startup desligado por
+política, na tomada a 100%). A máquina já tinha o `-Power` aplicado desde 2026-10-01; a rodada
+de hoje foi de conferência, elevada, sem suspender nem fechar a tampa.
+
+Ela achou cinco defeitos, corrigidos no mesmo dia, todos com teste de regressão no harness:
+
+| Defeito | Como aparecia na máquina | Correção |
+|---|---|---|
+| A verificação exigia `LastTaskResult = 267009` | `[AVISO] daemon em execucao` permanente, com a tarefa `Running` e resultado `2147946720` (`0x800710E0`) | Vale o **estado** da tarefa; o resultado virou detalhe |
+| `Install-AwakeGuard.ps1` não reiniciava o daemon | PID de 11/11 18:24 seguia vivo depois da reinstalação de 12/11 18:34; `awake.log` sem novo `Daemon iniciado` | `Stop-ScheduledTask` e espera antes de trocar script e definição |
+| `-Uninstall` e `KeepAwakeWhileConnected = $false` deixavam o processo órfão | Numa tarefa descartável, `Unregister-ScheduledTask` com instância viva apagou a tarefa e o processo seguiu rodando | Mesmo `Stop` antes do `Unregister` |
+| `'S0'` casado na saída inteira do `powercfg /a` | `Modern Standby (S0) presente` num notebook S3: o `/a` lista o S0 entre os **indisponíveis**. A conectividade em espera foi gravada (AC=1 DC=1) e a verificação dava PASS | `Test-ModernStandbyAvailable` olha só o bloco dos disponíveis |
+| A checagem de `powercfg /requests` | Sem elevação o comando só devolve erro, e a verificação avisaria a toa com sessão ativa; elevada, um `[DRIVER]` de áudio contava como "algo segurando" | Só conclui elevada, procura o `[PROCESS] ...powershell.exe` do daemon e respeita o limiar de bateria |
+
+O mecanismo dos dois primeiros foi reproduzido numa tarefa descartável (`IgnoreNew`, SYSTEM):
+
+```
+1o Start                       Running  267009      (0x41301)   PID 19204
+2o Start, instancia viva       Running  2147946720  (0x800710E0) PID 19204
+Register -Force por cima       Running  2147946720               PID 19204   <- mesmo processo
+Start depois do Register       Running  2147946720               PID 19204   <- recusado
+Stop-ScheduledTask             Ready    267014      (0x41306)    (nenhum)
+Start depois do Stop           Running  267009                   PID 2100
+Unregister com instancia viva  (tarefa apagada)                  PID 2100    <- orfao
+```
+
+O que **passou a estar validado em notebook de verdade**:
+
+| O quê | Evidência |
+|---|---|
+| `powercfg` real grava, com `/setactive` e releitura | Painel na bateria 180 → 181 → 180 pelo `Set-PowerConfig.ps1`; `/qh` leu `0x000000b5` e depois `0x000000b4`. Os demais valores do plano batem com o `power.psd1` (tampa 0/0, suspender 0/1800, hibernar 0/0, painel 600/180, Wi-Fi 0/0) |
+| O parser de índices na saída **real** em pt-BR, com acentos | Mesmos valores acima, lidos pelos três scripts |
+| O daemon registra um bloqueio de verdade | Cópia do daemon com só a detecção de sessão trocada e a carga **real** do `Win32_Battery` (100%): `[PROCESS] ...\powershell.exe` apareceu em `SYSTEM:` no `powercfg /requests` |
+| O bloqueio é solto, sem vazamento | Sumiu do `/requests` ao encerrar a sessão, com a carga forçada para 9% e ao **matar o processo com o bloqueio preso** |
+| O daemon atravessa uma suspensão S3 real | Iniciado em 02/11 19:32, encerrado em 05/11 22:52; a suspensão de 05/11 19:50 ficou no meio |
+| O trigger de resume **dispara** (S3) | `Power-Troubleshooter 1` em 05/11 19:51:32 → passada do watchdog às 19:51:54 (os 20 s de atraso), fora da cadência de 10 min |
+| O carimbo de época avança ao acordar | Nessa mesma passada o `watchdog.log` trocou o último resume de 22/10 para 05/11 19:50:15 |
+| O XML das duas tarefas | `Export-ScheduledTask`: boot + evento (`PT10S`/`PT20S`/`PT30S`), `IgnoreNew`, `PT0S` no daemon, sem restrição de bateria |
+| A repetição do watchdog | 741 passadas no log, de 10 em 10 min |
+| O reparo de IPv6 no boot pelo Wi-Fi | 11/11: boot às 18:24:38, reinício às 18:25:05, `IPv6 recuperado` às 18:25:18. O mesmo em 10/11 |
+| O adaptador Wi-Fi | `AllowComputerToTurnOffDevice = Disabled` (só responde elevado; sem elevação o cmdlet devolve vazio) |
+| O daemon reinicia na reinstalação | PID 2420 → 7100 → 9996 em duas instalações seguidas, cada uma com o seu `Daemon iniciado` |
+| `.\Setup.ps1 -Power -Test` elevado | `0 falhas / 0 avisos` |
+
+O que **continua manual e pendente**, com o passo a passo:
+
+| O quê | Como testar |
+|---|---|
+| Fechar a tampa e continuar alcançável | Conectar de outra máquina, fechar a tampa (na tomada e depois na bateria), confirmar que a sessão segue. `powercfg /lastwake` e o log de `Kernel-Power 42` não podem ganhar entrada |
+| A suspensão por ociosidade na bateria, **sem** sessão | Tirar da tomada, não tocar por 30 min: tem que suspender (`Kernel-Power 42`) |
+| O daemon segurando uma suspensão **real** | Na bateria, sessão só de Terminal por mais de 30 min sem teclado nem mouse locais: não pode suspender. `awake.log` tem que mostrar `Segurando a maquina acordada` e o `/requests` elevado o `[PROCESS] ...powershell.exe` |
+| O limiar com descarga de verdade | Mesma sessão até a carga passar de 15%: `awake.log` registra `bateria caiu para`, e a máquina suspende. A leitura de carga foi real; a queda foi encenada |
+| O trigger de rede **disparando** | Desligar e religar o Wi-Fi e procurar uma passada ~30 s depois no `watchdog.log`. **A evidência histórica aqui é negativa**: em 05, 07 e 11/11 houve `NetworkProfile 10000` sem passada 30 s depois. A tarefa de então era anterior ao #33 e não dá para saber se já tinha o trigger; a de hoje tem (conferido no XML, e a consulta casa com os eventos reais) |
+| O trigger de resume depois da reinstalação de hoje | Suspender e acordar: passada do watchdog ~20 s depois. No daemon o esperado é **nada** — a instância viva recusa a nova. Falta ver se essa recusa por trigger também grava `0x800710E0` |
+| Conectar de fora com a tela bloqueada, **na bateria** | `Win+L`, tirar da tomada, conectar e abrir o Terminal |
+
+Sobra na máquina, sem efeito: `CONNECTIVITYINSTANDBY` ficou em 1/1 no plano, gravado pelo
+quarto defeito. Em S3 a chave não faz nada, e não foi revertida.
 
 **Próximo passo — combinado em 2026-08-21:** este item recebe um **relatório da execução num
 notebook**. A ordem é: `.\scripts\Get-PowerDiagnostics.ps1` **antes** de aplicar (linha de

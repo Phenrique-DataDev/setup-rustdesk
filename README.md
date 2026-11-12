@@ -563,7 +563,14 @@ Três detalhes que decidem se isso funciona:
   zero no meio de um agente é pior do que suspender.
 
 Sair sempre solta: há um `finally` e um handler de `PowerShell.Exiting`. Um daemon morto
-deixando a máquina insone para sempre seria pior do que não ter daemon.
+deixando a máquina insone para sempre seria pior do que não ter daemon. Quando o processo é
+morto sem passar por nenhum dos dois (`Stop-ScheduledTask`, que é como a reinstalação o
+reinicia), quem solta é o Windows: o bloqueio some do `powercfg /requests` junto com a thread
+— conferido num notebook real.
+
+Reinstalar (`-Power`) **reinicia** o daemon: a instância viva é parada antes de o script e a
+tarefa serem trocados, e o `awake.log` ganha um novo `Daemon iniciado`. Sem isso o processo
+antigo seguiria rodando o código antigo — ver *Armadilhas conhecidas*.
 
 ### Acordar e conectar viraram eventos
 
@@ -661,21 +668,31 @@ Administrador, e encerra pelo botão **Encerrar**, por Ctrl+C ou após 15 minuto
 
 ### O que não está coberto
 
-Nada disto foi validado num notebook real: a máquina de referência é um desktop, e o passo de
-energia sai limpo nela sem fazer nada.
+A máquina de referência é um desktop, e o passo de energia sai limpo nela sem fazer nada. O
+que o cobre no dia a dia é `tests/Power.Harness.ps1`, que executa os scripts de verdade contra
+um `powercfg`, um Agendador e cmdlets de rede substituídos por stubs, numa cópia temporária do
+repositório — o daemon inclusive roda, com a máquina de estados inteira encenada. Isso já pagou
+por si, achando dois defeitos que o parser aprovava: um cast que **matava o daemon na partida,
+em qualquer máquina**, e o adaptador de rede sendo reescrito a cada execução.
 
-O que existe é `tests/Power.Harness.ps1`, que executa os scripts de verdade contra um
-`powercfg` e cmdlets de rede substituídos por stubs, numa cópia temporária do repositório — o
-daemon inclusive roda, com a máquina de estados inteira encenada. Isso já pagou por si,
-achando dois defeitos que o parser aprovava: um cast que **matava o daemon na partida, em
-qualquer máquina**, e o adaptador de rede sendo reescrito a cada execução.
+Mas stub não é sistema, e a primeira conferência num **notebook S3 real** (2026-11-12) achou
+cinco defeitos que o harness aprovava — entre eles a reinstalação que não reiniciava o daemon
+e um notebook S3 tomado por Modern Standby. O que essa rodada **provou** na máquina: o
+`powercfg` real grava e a releitura confere; o daemon registra um bloqueio de verdade em
+`powercfg /requests` e o solta ao fim da sessão, abaixo do limiar e quando o processo morre; o
+trigger de resume dispara depois de uma suspensão S3; o carimbo de época avança ao acordar.
 
-Mas stub não é sistema. **Nenhuma linha de `powercfg` gravou de verdade** (a economia de
-energia do Wi-Fi inclusive), o Windows nunca deixou de suspender por causa do daemon, e o
-Agendador nunca disparou o trigger de resume. O trigger de rede tem uma evidência a mais — a
-consulta dele casa com os eventos reais da máquina de referência —, mas nunca foi visto
-disparando numa troca de Wi-Fi, que é o caso para o qual existe.
-Está registrado como trabalho conhecido no [BACKLOG](BACKLOG.md), não como promessa.
+O que **segue sem prova**, porque exige tampa fechada, suspensão ou bateria descarregando:
+
+- fechar a tampa e continuar alcançável;
+- o Windows de fato **não suspender** na bateria durante uma sessão só de Terminal;
+- o limiar de 15% com a bateria caindo de verdade;
+- o trigger de rede disparando numa troca de Wi-Fi — a consulta dele casa com os eventos
+  reais, mas ele nunca foi visto disparando, e o histórico do notebook não ajuda;
+- o `Kernel-Power 507` e a conectividade em espera, que só existem em Modern Standby.
+
+A lista completa, com a evidência de cada item validado e o passo a passo de cada pendente,
+está no item 0 do [BACKLOG](BACKLOG.md).
 
 Também não está coberto: se, em Modern Standby, a máquina realmente atende conexão nova
 enquanto está em espera. Ligar a conectividade em espera torna isso *possível*; não prova que
@@ -1267,6 +1284,32 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
   entra no esquema e o sistema segue usando o antigo. O script imprime sucesso, a leitura
   de conferência confirma, e a máquina continua suspendendo — a mesma família de falha do
   `-WhatIf` que gravava: convincente e errada.
+- **`LastTaskResult = 267009` não é "a tarefa está rodando".** `267009` (`0x41301`,
+  `SCHED_S_TASK_RUNNING`) só aparece enquanto o **último pedido de execução** foi o que está
+  rodando. A `RustDeskAwake` é `MultipleInstances IgnoreNew`: um `Start-ScheduledTask` com o
+  daemon vivo é **recusado** e regrava o campo com `2147946720` (`0x800710E0`) — com a tarefa
+  `Running` e o daemon intacto. A verificação exigia `267009` e dava `[AVISO]` permanente.
+  Para saber se está de pé, olhe o **estado** (`State -eq 'Running'`). **Encontrado em
+  2026-11-12**, no primeiro notebook em que a tarefa foi reinstalada por cima de si mesma.
+- **`Register-ScheduledTask -Force` não reinicia nada.** Ele troca a definição e deixa a
+  instância viva onde está: o `powershell.exe` antigo segue com o **código antigo em memória**,
+  e com `IgnoreNew` o `Start` seguinte é recusado sem erro. Reinstalar o daemon gravava o
+  script novo, anunciava sucesso e nada mudava — o PID e o `awake.log` eram os de antes. Para
+  trocar o código de uma tarefa de longa duração: `Stop-ScheduledTask`, **esperar** o estado
+  sair de `Running`, e só então registrar e iniciar. O watchdog não tem esse problema: cada
+  passada é um processo novo, que lê o script do disco.
+- **`Unregister-ScheduledTask` não mata a instância em execução.** A tarefa some do Agendador
+  e o processo fica órfão até o próximo boot. Pare antes de apagar.
+- **O `powercfg /a` lista também os estados que a máquina *não* tem.** Num notebook S3 a saída
+  traz `Em Espera (S0 Ocioso com Baixo Consumo de Energia)` no bloco dos **indisponíveis**, com
+  o motivo embaixo. Casar `S0` na saída inteira deu Modern Standby numa máquina S3, e a
+  conectividade em espera foi gravada onde não existe espera moderna. Os cabeçalhos são
+  traduzidos; o que não muda é a forma — o primeiro bloco, até a primeira linha em branco, é o
+  dos disponíveis (`Test-ModernStandbyAvailable`).
+- **`powercfg /requests` exige Administrador** — sem elevação devolve só a mensagem de erro — e
+  lista bloqueios de qualquer origem: um `[DRIVER]` de áudio tocando aparece em `SYSTEM:` do
+  mesmo jeito. O do daemon é a linha `[PROCESS] ...\powershell.exe`. `Get-NetAdapterPowerManagement`
+  tem a mesma armadilha de elevação: sem ela devolve vazio, que parece "o driver não expõe".
 - **Os rótulos do `powercfg` são traduzidos em Windows localizado.** Procurar por
   `Current AC Power Setting Index` dá falso negativo em pt-BR, do mesmo jeito que
   `IsInRole('Administrator')` com string. O que não muda é o formato do valor: os índices

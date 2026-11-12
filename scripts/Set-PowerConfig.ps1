@@ -70,8 +70,11 @@ function Get-Opt {
 # powercfg /a diz quais estados existem. Em maquina sem Modern Standby a chave
 # de conectividade em espera nao esta no plano, e tentar grava-la devolve erro -
 # o certo ali e pular, nao falhar.
+#
+# So o bloco dos estados DISPONIVEIS conta: o /a lista tambem os indisponiveis,
+# e casar 'S0' na saida inteira dava Modern Standby num notebook S3.
 $estados = (& powercfg /a 2>&1 | Out-String)
-$temModernStandby = [bool]($estados -match 'S0')
+$temModernStandby = Test-ModernStandbyAvailable -PowercfgOutput $estados
 $log += "estados de suspensao: $(if ($temModernStandby) { 'Modern Standby (S0) presente' } else { 'sem S0 (S3 classico ou nenhum)' })"
 
 # --- 3) aplicar os pares AC/DC ----------------------------------------

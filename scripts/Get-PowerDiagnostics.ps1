@@ -139,7 +139,9 @@ foreach ($nic in $nics) {
     Add-Linha "$($nic.Name) [$($nic.InterfaceDescription)]"
     $pm = Get-NetAdapterPowerManagement -Name $nic.Name -ErrorAction SilentlyContinue
     if (-not $pm) {
-        Add-Linha '  o driver nao expoe gerenciamento de energia'
+        # Sem elevacao o cmdlet devolve vazio mesmo quando o driver expoe -
+        # visto num notebook real, onde a mesma consulta elevada respondeu.
+        Add-Linha "  $(if ($elevado) { 'o driver nao expoe gerenciamento de energia' } else { 'sem resposta: esta consulta exige Administrador (nao prova que o driver nao expoe)' })"
     } else {
         Add-Linha "  AllowComputerToTurnOffDevice: $($pm.AllowComputerToTurnOffDevice)"
         Add-Linha "  DeviceSleepOnDisconnect ....: $($pm.DeviceSleepOnDisconnect)"
@@ -296,9 +298,11 @@ foreach ($t in @($paths.TaskName, $paths.AwakeTask, 'HerdrServer')) {
     Add-Linha "  triggers: $tipos"
 }
 Add-Linha ''
-Add-Linha 'Lembrete: LastTaskResult 267009 (0x41301) e SCHED_S_TASK_RUNNING - o valor'
-Add-Linha 'saudavel para RustDeskAwake e HerdrServer, que rodam em foreground. Um 0 ali'
-Add-Linha 'significaria que o processo saiu.'
+Add-Linha 'Lembrete: quem diz se o RustDeskAwake esta de pe e o ESTADO (Running), nao o'
+Add-Linha 'resultado. 267009 (0x41301, SCHED_S_TASK_RUNNING) so aparece enquanto o ultimo'
+Add-Linha 'pedido de execucao foi o que esta rodando; como a tarefa e IgnoreNew, um pedido'
+Add-Linha 'novo com o daemon vivo e recusado e deixa 2147946720 (0x800710E0) no resultado,'
+Add-Linha 'com o daemon rodando normalmente. Estado Ready com resultado 0 = ele saiu.'
 
 # --- eventos de energia -------------------------------------------------
 Add-Secao "eventos de energia (ultimas $Hours h)"

@@ -409,8 +409,10 @@ if (Test-IsLaptop) {
         Test-Item 'nunca hibernar por ociosidade' $true
     }
 
+    # So os estados DISPONIVEIS: o /a tambem lista o S0 entre os indisponiveis,
+    # e casar a saida inteira dava Modern Standby num notebook S3.
     $estadosSuspensao = (& powercfg /a 2>&1 | Out-String)
-    if ($estadosSuspensao -match 'S0') {
+    if (Test-ModernStandbyAvailable -PowercfgOutput $estadosSuspensao) {
         $conn = Read-Indices 'SUB_NONE' 'F15576E8-98B7-4186-B944-EAFA664402D9'
         if (-not $conn) {
             Test-Item 'conectividade de rede em espera' 'aviso' 'Modern Standby presente, mas o plano nao expoe a chave'
@@ -433,15 +435,20 @@ if (Test-IsLaptop) {
     }
     if ($awake) {
         $ai = Get-ScheduledTaskInfo -TaskName $paths.AwakeTask -ErrorAction SilentlyContinue
-        if ($ai) {
-            # 267009 = 0x41301 = SCHED_S_TASK_RUNNING. O daemon roda em foreground,
-            # entao esse e o valor saudavel - um 0 ali significaria que ele saiu.
-            if ($ai.LastTaskResult -eq 267009) {
-                Test-Item 'daemon em execucao' $true "ultima execucao: $($ai.LastRunTime)"
-            } else {
-                Test-Item 'daemon em execucao' 'aviso' `
-                    "LastTaskResult $($ai.LastTaskResult) (esperado 267009 = em execucao)"
-            }
+        # Quem diz se o daemon esta de pe e o State da tarefa, nao o
+        # LastTaskResult. 267009 (0x41301, SCHED_S_TASK_RUNNING) so aparece
+        # enquanto o ULTIMO pedido de execucao foi o que esta rodando. A tarefa
+        # e IgnoreNew: qualquer pedido novo com o daemon vivo (reinstalar, o
+        # trigger de resume) e recusado e regrava o campo com 2147946720
+        # (0x800710E0) - com o daemon rodando normalmente. Exigir 267009 dava
+        # AVISO permanente num notebook real. O resultado fica so como detalhe.
+        $resultado = if ($ai) { "; ultimo resultado: $($ai.LastTaskResult)" } else { '' }
+        if ([string]$awake.State -eq 'Running') {
+            Test-Item 'daemon em execucao' $true `
+                "estado: Running; ultima execucao: $(if ($ai) { $ai.LastRunTime })$resultado"
+        } else {
+            Test-Item 'daemon em execucao' 'aviso' `
+                "estado: $($awake.State)$resultado - a tarefa nao esta rodando; rode .\Setup.ps1 -Power"
         }
     }
 
@@ -469,13 +476,27 @@ if (Test-IsLaptop) {
     }
 
     # --- quem segura a maquina acordada agora ---
-    $req    = (& powercfg /requests 2>&1 | Out-String)
-    $temReq = [bool]($req -match '(?m)^\[(DRIVER|PROCESS|SERVICE)\]')
+    # powercfg /requests exige Administrador: sem elevacao ele devolve so a
+    # mensagem de erro, que nao casa com nada - e a checagem avisava a toa em
+    # toda verificacao feita de dentro de uma sessao remota. So conclui elevado.
+    #
+    # E o que se procura e o bloqueio DO DAEMON ([PROCESS] ...powershell.exe),
+    # nao qualquer bloqueio: um [DRIVER] de audio tocando tambem aparece ali, e
+    # casar qualquer linha escondia justamente o daemon que nao segurou.
     $sessao = Test-RemoteSessionActive
-    Write-Host "          sessao remota agora: $(if ($sessao) { 'ATIVA' } else { 'nenhuma' }); bloqueios de energia ativos: $(if ($temReq) { 'sim' } else { 'nao' })" -ForegroundColor DarkGray
-    if ($sessao -and -not $temReq) {
-        Test-Item 'ha sessao remota e algo segurando a maquina acordada' 'aviso' `
-            'o daemon deveria ter registrado um SYSTEM em powercfg /requests'
+    if (-not $elevated) {
+        Write-Host "          sessao remota agora: $(if ($sessao) { 'ATIVA' } else { 'nenhuma' }); bloqueio do daemon: requer Administrador para consultar" -ForegroundColor DarkGray
+    } else {
+        $req    = (& powercfg /requests 2>&1 | Out-String)
+        $temReq = [bool]($req -match '(?im)^\[PROCESS\].*\\powershell\.exe\s*$')
+        Write-Host "          sessao remota agora: $(if ($sessao) { 'ATIVA' } else { 'nenhuma' }); bloqueio do daemon ativo: $(if ($temReq) { 'sim' } else { 'nao' })" -ForegroundColor DarkGray
+        # Abaixo do limiar de bateria o daemon solta de proposito.
+        $carga  = Get-BatteryPercent
+        $limiar = [int](Get-PowerOpt 'KeepAwakeMinBatteryPercent' 15)
+        if ($sessao -and -not $temReq -and $carga -ge $limiar) {
+            Test-Item 'ha sessao remota e o daemon segurando a maquina acordada' 'aviso' `
+                'esperado um [PROCESS] ...powershell.exe em powercfg /requests; o daemon reavalia a cada intervalo, entao repita em 1 min antes de concluir'
+        }
     }
 }
 

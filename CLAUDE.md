@@ -169,6 +169,21 @@ afetam quem edita este repo:
   passo do adaptador é somente leitura; não volte a gravar ali sem testar num notebook.
 - **A guarda do IPv6 no watchdog é "uma vez por época", não por boot.** Época = boot + último
   resume. Com Fast Startup ligado o `LastBootUpTime` nem avança ao desligar e ligar.
+- **Tarefa de longa duração: julgue pelo `State`, nunca por `LastTaskResult -eq 267009`.** O
+  `267009` só fica enquanto o último pedido de execução foi o que está rodando. A
+  `RustDeskAwake` é `IgnoreNew`: um `Start` com o daemon vivo é recusado e regrava o campo com
+  `2147946720` (`0x800710E0`), com a tarefa `Running`. Há caso no harness.
+- **`Register-ScheduledTask -Force` não reinicia a instância viva**, e `Unregister` não a
+  mata. Para trocar o código do daemon: `Stop-ScheduledTask`, esperar sair de `Running`, e só
+  então registrar e iniciar (`Stop-AwakeDaemon`, em `Install-AwakeGuard.ps1`). Sem isso o
+  processo antigo segue com o código antigo e o `Start` novo é recusado, sem erro. Há caso no
+  harness; não tire o `Stop`.
+- **`powercfg /a` lista também os estados indisponíveis.** `-match 'S0'` na saída inteira dá
+  Modern Standby num notebook S3. Use `Test-ModernStandbyAvailable` (lib), que olha só o
+  primeiro bloco.
+- **`powercfg /requests` e `Get-NetAdapterPowerManagement` exigem elevação** e, sem ela,
+  devolvem erro ou vazio em vez de negar. E `/requests` lista bloqueio de qualquer origem: o
+  do daemon é a linha `[PROCESS] ...\powershell.exe`, não "alguma linha em `SYSTEM:`".
 
 ## O que está em aberto
 
@@ -177,9 +192,12 @@ trabalho novo — em especial os itens 1 e 2, que são o mesmo cenário: **numa 
 zerada, rode `.\Setup.ps1 -All` e guarde a saída**, porque três caminhos do repo (instalação
 do Herdr, escrita da senha, e o download do `.msi` fixado) nunca foram executados.
 
-O item **0** é o mais novo e o mais arriscado: o suporte a notebook inteiro (energia, tampa,
-daemon, trigger de resume) foi escrito e testado estaticamente, mas **nunca rodou num
-notebook**. Peça o teste antes de construir por cima dele.
+O item **0** é o suporte a notebook (energia, tampa, daemon, triggers). Em 2026-11-12 ele foi
+conferido num notebook S3 real — o `powercfg` gravando, o bloqueio do daemon em
+`powercfg /requests`, o trigger de resume —, e a rodada achou cinco defeitos que o harness
+aprovava. **Segue sem prova** o que exige tampa fechada, suspensão ou bateria descarregando, e
+o trigger de rede; o item lista o passo a passo de cada um. Peça esses testes antes de
+construir por cima.
 
 Suporte a Linux: `docs/linux.md`. O Herdr está automatizado e validado; o RustDesk é
 documentação, não código.
@@ -194,9 +212,11 @@ documentação, não código.
   `[ui.sound] enabled = $false` é intencional — não "conserte" ligando de volta.
 - Nenhuma verificação cobre conectar de outra máquina com a tela bloqueada. Peça o teste
   manual (`Win+L` + conectar de outro dispositivo).
-- **Nada do passo de energia foi executado.** A máquina de referência é desktop. Fechar a
-  tampa, o daemon segurando uma suspensão e o trigger de resume disparando são todos testes
-  manuais pendentes — ver item 0 do `BACKLOG.md`.
+- **O passo de energia só foi conferido sem suspender.** A máquina de referência é desktop, e
+  o notebook S3 de 2026-11-12 ficou na tomada. Fechar a tampa, o daemon segurando uma
+  suspensão real, o limiar com a bateria caindo e o trigger de rede disparando são testes
+  manuais pendentes — ver item 0 do `BACKLOG.md`. Não os simule: suspender ou fechar a tampa
+  derruba a sessão de quem está pedindo.
 
 ## Idioma
 
