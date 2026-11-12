@@ -510,6 +510,40 @@ function Test-IsLaptop {
     }
 }
 
+function Test-ModernStandbyAvailable {
+    <#
+    .SYNOPSIS
+        Retorna $true se a saida de 'powercfg /a' lista o S0 (espera moderna)
+        entre os estados DISPONIVEIS.
+    .DESCRIPTION
+        Recebe o texto em vez de chamar o powercfg: quem chama ja o tem, e
+        assim a funcao e testavel com a saida de qualquer maquina.
+    .NOTES
+        Procurar 'S0' na saida inteira da falso positivo em notebook S3: o
+        powercfg /a lista TAMBEM os estados indisponiveis, com o motivo, e o
+        S0 aparece la ('Em Espera (S0 Ocioso com Baixo Consumo de Energia) -
+        o firmware do sistema nao da suporte'). Num notebook S3 real isso fez
+        o passo de energia anunciar 'Modern Standby (S0) presente' e gravar a
+        conectividade em espera numa maquina que nao tem espera moderna.
+
+        Os rotulos sao traduzidos, entao nao da para casar pelo cabecalho. O
+        que nao muda e a forma: o primeiro bloco (ate a primeira linha em
+        branco) e o dos estados disponiveis.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$PowercfgOutput)
+
+    $bloco = @()
+    foreach ($linha in ($PowercfgOutput -split "`r?`n")) {
+        if ($linha.Trim() -eq '') {
+            if ($bloco.Count -gt 0) { break }
+            continue
+        }
+        $bloco += $linha
+    }
+    return [bool](@($bloco | Where-Object { $_ -match '\bS0\b' }).Count)
+}
+
 function Get-BatteryPercent {
     <#
     .SYNOPSIS
@@ -900,7 +934,8 @@ Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths,
                               Test-HerdrServer, Wait-HerdrServer, Import-RustDeskConfigFile,
                               Get-RustDeskPin, Get-RustDeskVersion, Resolve-RustDeskLatestVersion,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI,
-                              Test-IsLaptop, Get-BatteryPercent, Test-RemoteSessionActive,
+                              Test-IsLaptop, Test-ModernStandbyAvailable,
+                              Get-BatteryPercent, Test-RemoteSessionActive,
                               Get-LastResumeTime, Get-PowerEpochStamp, New-RustDeskResumeTrigger,
                               New-RustDeskNetworkTrigger, New-RustDeskEventTrigger,
                               Get-RustDeskFirewallCoverage, Get-RustDeskFirewallState
