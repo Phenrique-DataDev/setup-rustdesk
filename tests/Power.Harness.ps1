@@ -106,6 +106,7 @@ Import-Module $mod -Force
 $global:plano = @{}; $global:chamadas = @(); $global:ativado = $false
 $global:temS0 = $false; $global:escritaFajuta = $false; $global:nicDesligado = $false
 $global:ocultos = @()
+$global:requests = @()
 
 function Reset-Plano {
     # -Ocultos: chaves 'SUB/SETTING' com atributo de oculto - o /q as omite e
@@ -143,9 +144,20 @@ function powercfg {
                          '    Em Espera (S0 Ocioso com Baixo Consumo de Energia) Rede Conectada',
                          '    Hibernar')
             }
+            # Formato real de um notebook S3 (pt-BR): o /a lista TAMBEM os
+            # estados indisponiveis, e o S0 aparece la. Casar 'S0' na saida
+            # inteira dava Modern Standby numa maquina que nao tem.
             return @('Os seguintes estados de suspensao estao disponiveis neste sistema:',
-                     '    Espera (S3)', '    Hibernar')
+                     '    Espera (S3)', '    Hibernar', '',
+                     'Os seguintes estados de suspensao nao estao disponiveis neste sistema:',
+                     '    Modo de espera (S1)',
+                     "`tO firmware do sistema nao oferece suporte a este estado de espera.", '',
+                     '    Em Espera (S0 Ocioso com Baixo Consumo de Energia)',
+                     "`tO firmware do sistema nao da suporte a este estado de espera.", '',
+                     '    Suspensao Hibrida',
+                     "`tO hipervisor nao da suporte a este modo de espera.")
         }
+        '^/requests$' { return $global:requests }
         '^/qh?$' {
             $chave = "$($a[2])/$($a[3])"
             $escondido = ($a[0] -eq '/q') -and ($global:ocultos -contains $chave)
@@ -281,8 +293,13 @@ It 'a segunda passada nao reescreve nada' {
 }
 
 It 'sem Modern Standby, a conectividade em espera e pulada sem erro' {
+    # Regressao: o stub do /a lista o S0 entre os estados INDISPONIVEIS, como
+    # um notebook S3 real, e a chave existe no plano. O passo anunciava Modern
+    # Standby e gravava a conectividade em espera.
     Reset-Plano -ComS0 $false
+    $global:plano['SUB_NONE/F15576E8-98B7-4186-B944-EAFA664402D9'] = @{ Ac = 0; Dc = 0 }
     $saida = Invoke-SetPower
+    Assert-True ($saida -match 'sem S0') "tomou o S0 indisponivel por Modern Standby: $saida"
     Assert-True ($saida -match 'PULADO.*conectividade') 'nao reportou o pulo'
     Assert-True (-not (Test-Chamou 'F15576E8')) 'tentou gravar uma chave que nao existe'
 }
@@ -588,6 +605,240 @@ It 'avisa quando o intervalo de checagem nao e menor que a suspensao' {
 '@ | Set-Content -LiteralPath $cfg -Encoding UTF8
     $saida = & "$global:sb\scripts\Install-AwakeGuard.ps1" -ConfigFile $cfg -WhatIf 6>&1 | Out-String
     Assert-True ($saida -match 'nao e menor que StandbyIdleDC') "nao avisou sobre o intervalo: $saida"
+}
+
+# =====================================================================
+Write-Host ''
+Write-Host '=== Harness: achados do primeiro notebook S3 real (2026-11-12) ===' -ForegroundColor Cyan
+
+It 'Test-ModernStandbyAvailable so olha os estados disponiveis' {
+    # Saida real de um notebook S3 em pt-BR (acentos removidos).
+    $s3 = @(
+        'Os seguintes estados de suspensao estao disponiveis neste sistema:'
+        '    Espera (S3)'
+        '    Hibernar'
+        ''
+        'Os seguintes estados de suspensao nao estao disponiveis neste sistema:'
+        '    Modo de espera (S1)'
+        "`tO firmware do sistema nao oferece suporte a este estado de espera."
+        ''
+        '    Em Espera (S0 Ocioso com Baixo Consumo de Energia)'
+        "`tO firmware do sistema nao da suporte a este estado de espera."
+    ) -join "`r`n"
+    Assert-True (-not (Test-ModernStandbyAvailable -PowercfgOutput $s3)) 'S0 indisponivel contou como Modern Standby'
+
+    $s0 = @(
+        'The following sleep states are available on this system:'
+        '    Standby (S0 Low Power Idle) Network Connected'
+        '    Hibernate'
+        ''
+        'The following sleep states are not available on this system:'
+        '    Standby (S3)'
+        "`tThis standby state is disabled when S0 low power idle is supported."
+    ) -join "`n"
+    Assert-True (Test-ModernStandbyAvailable -PowercfgOutput $s0) 'nao reconheceu o S0 disponivel'
+
+    # Nada disponivel (VM): o primeiro bloco ja e o dos indisponiveis.
+    $nada = @(
+        'The following sleep states are not available on this system:'
+        '    Standby (S1)'
+        "`tThe system firmware does not support this standby state."
+        ''
+        '    Standby (S0 Low Power Idle)'
+        "`tThe system firmware does not support this standby state."
+    ) -join "`r`n"
+    Assert-True (-not (Test-ModernStandbyAvailable -PowercfgOutput $nada)) 'maquina sem estado nenhum contou como Modern Standby'
+    Assert-True (-not (Test-ModernStandbyAvailable -PowercfgOutput '')) 'saida vazia contou como Modern Standby'
+}
+
+# --- Install-AwakeGuard contra um Agendador falso ----------------------
+# O Agendador falso reproduz o que o real fez no notebook: tarefa IgnoreNew
+# recusa Start com instancia viva, e Register -Force nao mexe na instancia.
+function Invoke-AwakeGuardFalso {
+    param([hashtable]$Parametros = @{}, [bool]$Existe = $true, [string]$Estado = 'Running')
+
+    $global:tarefaExiste = $Existe; $global:tarefaEstado = $Estado
+    $global:chamadas = @()
+    function Get-ScheduledTask {
+        param($TaskName, $ErrorAction)
+        if (-not $global:tarefaExiste) { return $null }
+        return [PSCustomObject]@{ TaskName = $TaskName; State = $global:tarefaEstado }
+    }
+    function Stop-ScheduledTask {
+        param($TaskName, $ErrorAction)
+        $global:chamadas += 'Stop'; $global:tarefaEstado = 'Ready'
+    }
+    function Register-ScheduledTask {
+        param($TaskName, $Action, $Trigger, $Principal, $Settings, [switch]$Force)
+        $global:chamadas += 'Register'; $global:tarefaExiste = $true
+        if (-not $global:tarefaEstado) { $global:tarefaEstado = 'Ready' }
+    }
+    function Start-ScheduledTask {
+        param($TaskName)
+        if ($global:tarefaEstado -eq 'Running') { $global:chamadas += 'Start RECUSADO (0x800710E0)'; return }
+        $global:chamadas += 'Start'; $global:tarefaEstado = 'Running'
+    }
+    function Unregister-ScheduledTask {
+        param($TaskName, $Confirm, $ErrorAction)
+        $global:chamadas += 'Unregister'; $global:tarefaExiste = $false
+    }
+    function Start-Sleep { }
+
+    # ProgramData falso: o script do daemon e gravado na copia, nao na maquina.
+    $pdAntes = $env:ProgramData
+    $env:ProgramData = Join-Path $global:sb 'programdata'
+    New-Item -ItemType Directory -Path (Join-Path $env:ProgramData 'RustDesk') -Force | Out-Null
+    try {
+        return (& "$global:sb\scripts\Install-AwakeGuard.ps1" @Parametros 6>&1 | Out-String)
+    } finally {
+        $env:ProgramData = $pdAntes
+    }
+}
+function Get-Indice($nome) { return [array]::IndexOf([string[]]$global:chamadas, $nome) }
+
+It 'Install-AwakeGuard para a instancia viva ANTES de registrar e iniciar' {
+    # Regressao: sem o Stop, o Register -Force trocava o script e a instancia
+    # antiga seguia rodando o codigo velho; o Start era recusado pelo IgnoreNew
+    # e o awake.log nunca ganhava um novo 'Daemon iniciado'.
+    $saida = Invoke-AwakeGuardFalso -Estado 'Running'
+    $c = $global:chamadas -join ' | '
+    Assert-True ((Get-Indice 'Stop') -ge 0) "nao parou a instancia viva: $c"
+    Assert-True ((Get-Indice 'Stop') -lt (Get-Indice 'Register')) "o Stop veio depois do Register: $c"
+    Assert-True ((Get-Indice 'Register') -lt (Get-Indice 'Start')) "o Start nao veio depois do Register: $c"
+    Assert-True (-not (Test-Chamou 'RECUSADO')) "o Start foi recusado pelo IgnoreNew: $c"
+    Assert-Equal 'Running' $global:tarefaEstado 'o daemon nao terminou em execucao'
+    Assert-True ($saida -match 'instancia anterior do daemon parada') 'nao reportou a parada'
+    Assert-True ($saida -match 'daemon em execucao') 'nao confirmou a execucao'
+    Assert-True (Test-Path -LiteralPath (Join-Path $global:sb 'programdata\RustDesk\rustdesk-awake.ps1')) 'nao gravou o script na copia'
+}
+
+It 'Install-AwakeGuard numa maquina sem a tarefa nao chama Stop' {
+    $saida = Invoke-AwakeGuardFalso -Existe $false -Estado ''
+    Assert-True (-not (Test-Chamou '^Stop$')) 'chamou Stop sem instancia para parar'
+    Assert-True (Test-Chamou '^Start$') 'nao iniciou o daemon'
+    Assert-True ($saida -notmatch 'instancia anterior') 'reportou parada que nao houve'
+}
+
+It 'Install-AwakeGuard -Uninstall para o daemon antes de apagar a tarefa' {
+    # Unregister-ScheduledTask apaga a tarefa e deixa o processo orfao rodando
+    Invoke-AwakeGuardFalso -Parametros @{ Uninstall = $true } -Estado 'Running' | Out-Null
+    $c = $global:chamadas -join ' | '
+    Assert-True ((Get-Indice 'Stop') -ge 0) "nao parou o daemon: $c"
+    Assert-True ((Get-Indice 'Stop') -lt (Get-Indice 'Unregister')) "o Stop veio depois do Unregister: $c"
+}
+
+It 'Install-AwakeGuard -WhatIf nao para o daemon em execucao' {
+    $saida = Invoke-AwakeGuardFalso -Parametros @{ WhatIf = $true } -Estado 'Running'
+    Assert-True ($saida -match 'SIMULACAO') 'a saida nao indica simulacao'
+    Assert-Equal 0 @($global:chamadas).Count "houve efeito em simulacao: $($global:chamadas -join ' | ')"
+    Assert-Equal 'Running' $global:tarefaEstado 'a simulacao parou o daemon'
+}
+
+# --- a verificacao do daemon, executando o trecho do proprio script ----
+# Mesmo criterio do watchdog abaixo: roda o codigo de Test-RustDeskSetup.ps1,
+# nao uma reimplementacao.
+$verif = Get-Content -LiteralPath (Join-Path $global:sb 'scripts\Test-RustDeskSetup.ps1') -Raw
+$i = $verif.IndexOf('    # --- daemon ---')
+$f = $verif.IndexOf('    # --- adaptador de rede ---')
+if ($i -lt 0 -or $f -le $i) { throw 'marcadores do bloco do daemon nao encontrados em Test-RustDeskSetup.ps1' }
+$global:blocoDaemon = $verif.Substring($i, $f - $i)
+$i = $verif.IndexOf('    # --- quem segura a maquina acordada agora ---')
+$f = $verif.IndexOf('# --- processos')
+if ($i -lt 0 -or $f -le $i) { throw 'marcadores do bloco de bloqueios nao encontrados em Test-RustDeskSetup.ps1' }
+$trecho = $verif.Substring($i, $f - $i)
+$global:blocoRequests = $trecho.Substring(0, $trecho.LastIndexOf('}'))   # tira o fecho do if (Test-IsLaptop)
+
+function Invoke-BlocoDaemon {
+    param([string]$Estado, [long]$Codigo)
+    $global:itens = @()
+    $global:tarefaEstado = $Estado; $global:tarefaResultado = $Codigo
+    function Test-Item($nome, $ok, $detalhe = '') { $global:itens += [PSCustomObject]@{ Nome = $nome; Ok = $ok; Detalhe = $detalhe } }
+    function Get-ScheduledTask { param($TaskName, $ErrorAction) return [PSCustomObject]@{ TaskName = $TaskName; State = $global:tarefaEstado } }
+    function Get-ScheduledTaskInfo {
+        param($TaskName, $ErrorAction)
+        return [PSCustomObject]@{ LastTaskResult = $global:tarefaResultado; LastRunTime = [datetime]'2026-11-12 18:34:20' }
+    }
+    $paths    = [PSCustomObject]@{ AwakeScript = $mod; AwakeTask = 'RustDeskAwake' }
+    $elevated = $true
+    Invoke-Expression $global:blocoDaemon
+    return @($global:itens | Where-Object { $_.Nome -eq 'daemon em execucao' })
+}
+
+It 'daemon Running com LastTaskResult 0x800710E0 passa, sem aviso' {
+    # Regressao: exigir 267009 dava AVISO permanente. Num notebook real a
+    # tarefa estava Running com 2147946720 depois de um Start recusado.
+    $r = @(Invoke-BlocoDaemon -Estado 'Running' -Codigo 2147946720)
+    Assert-Equal 1 $r.Count 'a linha do daemon nao foi emitida'
+    Assert-True ($r[0].Ok -eq $true) "gerou '$($r[0].Ok)' com a tarefa em execucao: $($r[0].Detalhe)"
+    Assert-True ($r[0].Detalhe -match '2147946720') 'o resultado deixou de aparecer como detalhe'
+}
+
+It 'daemon Running com 267009 continua passando' {
+    $r = @(Invoke-BlocoDaemon -Estado 'Running' -Codigo 267009)
+    Assert-True ($r[0].Ok -eq $true) 'reprovou o caso saudavel classico'
+}
+
+It 'daemon parado (Ready) vira aviso, qualquer que seja o resultado' {
+    foreach ($res in 0, 267009) {
+        $r = @(Invoke-BlocoDaemon -Estado 'Ready' -Codigo $res)
+        Assert-Equal 'aviso' $r[0].Ok "tarefa Ready com resultado $res nao gerou aviso"
+    }
+}
+
+$reqAudio = @(
+    'DISPLAY:', 'Nenhuma.', '', 'SYSTEM:',
+    '[DRIVER] Realtek Audio (INTELAUDIO\FUNC_01)', 'Um fluxo de audio esta em uso no momento.', '',
+    'AWAYMODE:', 'Nenhuma.'
+)
+$reqDaemon = @(
+    'DISPLAY:', 'Nenhuma.', '', 'SYSTEM:',
+    '[DRIVER] Realtek Audio (INTELAUDIO\FUNC_01)', 'Um fluxo de audio esta em uso no momento.',
+    '[PROCESS] \Device\HarddiskVolume3\Windows\System32\WindowsPowerShell\v1.0\powershell.exe', '',
+    'AWAYMODE:', 'Nenhuma.'
+)
+$reqSemAdmin = @('Este comando requer privilegios de administrador e deve ser executado de um prompt de comando elevado.')
+
+function Invoke-BlocoRequests {
+    param([bool]$Elevado, [bool]$Sessao, [string[]]$Requests, [int]$Carga = 100)
+    $global:itens = @(); $global:requests = $Requests
+    $global:sessaoFalsa = $Sessao; $global:cargaFalsa = $Carga
+    function Test-Item($nome, $ok, $detalhe = '') { $global:itens += [PSCustomObject]@{ Nome = $nome; Ok = $ok; Detalhe = $detalhe } }
+    function Test-RemoteSessionActive { return $global:sessaoFalsa }
+    function Get-BatteryPercent { return $global:cargaFalsa }
+    function Get-PowerOpt($nome, $padrao) { return $padrao }
+    $elevated = $Elevado
+    Invoke-Expression $global:blocoRequests 6>$null
+    return @($global:itens)
+}
+
+It 'sessao ativa e so um [DRIVER] de audio em /requests: avisa' {
+    # Regressao: qualquer linha [DRIVER|PROCESS|SERVICE] contava como "algo
+    # segurando", e um fluxo de audio escondia o daemon que nao segurou.
+    $r = @(Invoke-BlocoRequests -Elevado $true -Sessao $true -Requests $reqAudio)
+    Assert-Equal 1 $r.Count 'nao avisou que o daemon nao esta segurando'
+    Assert-Equal 'aviso' $r[0].Ok 'o item nao e um aviso'
+}
+
+It 'sessao ativa e o powershell.exe do daemon em /requests: sem aviso' {
+    $r = @(Invoke-BlocoRequests -Elevado $true -Sessao $true -Requests $reqDaemon)
+    Assert-Equal 0 $r.Count "avisou com o daemon segurando: $($r | ForEach-Object { $_.Nome })"
+}
+
+It 'sem elevacao, /requests nao responde e a checagem nao conclui nada' {
+    # Regressao: a mensagem de erro do powercfg nao casa com nada, e toda
+    # verificacao sem elevacao feita de dentro de uma sessao remota avisava.
+    $r = @(Invoke-BlocoRequests -Elevado $false -Sessao $true -Requests $reqSemAdmin)
+    Assert-Equal 0 $r.Count 'avisou sem ter como consultar'
+}
+
+It 'bateria abaixo do limiar: o daemon solta de proposito e nao ha aviso' {
+    $r = @(Invoke-BlocoRequests -Elevado $true -Sessao $true -Requests $reqAudio -Carga 9)
+    Assert-Equal 0 $r.Count 'avisou de um bloqueio solto por bateria baixa'
+}
+
+It 'sem sessao remota nao ha o que avisar' {
+    $r = @(Invoke-BlocoRequests -Elevado $true -Sessao $false -Requests $reqAudio)
+    Assert-Equal 0 $r.Count 'avisou sem sessao'
 }
 
 # =====================================================================
