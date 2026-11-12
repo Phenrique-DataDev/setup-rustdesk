@@ -38,7 +38,43 @@ Assert-Elevated
 $log   = @()
 $paths = Get-RustDeskPaths
 
+function Stop-AwakeDaemon {
+    <#
+        Para a instancia viva do daemon e espera o Agendador confirmar.
+        Devolve $true se havia instancia e ela parou, $false se nao havia
+        nenhuma, e $null se ela nao parou dentro do prazo.
+
+        Existe porque Register-ScheduledTask -Force troca a definicao e o
+        script em disco, mas NAO toca na instancia que ja esta rodando: o
+        powershell.exe antigo segue vivo com o codigo antigo em memoria. E como
+        a tarefa e IgnoreNew, o Start-ScheduledTask seguinte e recusado
+        (LastTaskResult 0x800710E0) - a reinstalacao parecia ter funcionado e
+        nada tinha mudado. O mesmo vale para remover: Unregister-ScheduledTask
+        apaga a tarefa e deixa o processo orfao rodando ate o proximo boot.
+
+        O Stop mata o processo sem passar pelo finally do daemon; o bloqueio de
+        suspensao e solto pelo Windows quando a thread morre.
+    #>
+    param([string]$TaskName, [int]$TimeoutSeconds = 20)
+
+    # Guarda propria: nada aqui pode rodar em simulacao.
+    if ($WhatIfPreference) { return $false }
+
+    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $t -or [string]$t.State -ne 'Running') { return $false }
+
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $limite = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $limite) {
+        $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if (-not $t -or [string]$t.State -ne 'Running') { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $null
+}
+
 if ($Uninstall) {
+    [void](Stop-AwakeDaemon -TaskName $paths.AwakeTask)
     Unregister-ScheduledTask -TaskName $paths.AwakeTask -Confirm:$false -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $paths.AwakeScript -Force -ErrorAction SilentlyContinue
     Write-Host "  daemon removido (tarefa $($paths.AwakeTask) e script)"
@@ -63,6 +99,7 @@ $opts = Import-RustDeskConfigFile -Path $ConfigFile
 $log += "opcoes carregadas de: $(Resolve-Path $ConfigFile)"
 
 if ($opts.Contains('KeepAwakeWhileConnected') -and $opts['KeepAwakeWhileConnected'] -ne $true) {
+    [void](Stop-AwakeDaemon -TaskName $paths.AwakeTask)
     Unregister-ScheduledTask -TaskName $paths.AwakeTask -Confirm:$false -ErrorAction SilentlyContinue
     $log += 'KeepAwakeWhileConnected = $false: daemon nao instalado (e removido se existia).'
     $log | ForEach-Object { Write-Host "  $_" }
@@ -113,6 +150,15 @@ if (-not $PSCmdlet.ShouldProcess($paths.AwakeScript, 'gravar o daemon')) {
     return
 }
 
+# Parar ANTES de trocar script e definicao: sem isto a instancia antiga segue
+# rodando o codigo velho e recusa a nova (ver Stop-AwakeDaemon).
+$parou = Stop-AwakeDaemon -TaskName $paths.AwakeTask
+if ($parou -eq $true) {
+    $log += 'instancia anterior do daemon parada (o codigo novo so vale num processo novo)'
+} elseif ($null -eq $parou) {
+    $log += 'AVISO: a instancia anterior do daemon nao parou a tempo. A nova pode ser recusada (IgnoreNew).'
+}
+
 Set-Content -LiteralPath $paths.AwakeScript -Value $content -Encoding UTF8
 $log += "script instalado: $($paths.AwakeScript)"
 
@@ -158,6 +204,13 @@ $log += "  intervalo de checagem: ${poll}s, limiar de bateria: ${minB}%"
 if (-not $NoStart) {
     Start-ScheduledTask -TaskName $paths.AwakeTask
     Start-Sleep -Seconds 6
+    # Confirmar em vez de afirmar: um Start recusado nao gera erro nenhum.
+    $estado = [string](Get-ScheduledTask -TaskName $paths.AwakeTask -ErrorAction SilentlyContinue).State
+    if ($estado -eq 'Running') {
+        $log += 'daemon em execucao (tarefa em estado Running)'
+    } else {
+        $log += "AVISO: a tarefa nao ficou em execucao (estado: $estado). Veja $($paths.AwakeLog)."
+    }
     if (Test-Path -LiteralPath $paths.AwakeLog) {
         $log += 'primeira execucao (ultimas linhas do log):'
         Get-Content -LiteralPath $paths.AwakeLog -Tail 3 | ForEach-Object { $log += "    $_" }
