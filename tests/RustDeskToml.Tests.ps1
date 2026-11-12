@@ -479,6 +479,101 @@ It 'Install-Herdr usa polling configuravel para confirmar o servidor' {
         'espera fixa de tres segundos permaneceu'
 }
 
+# O instalador do Herdr guarda cada versao em ...\releases\<versao>\ e mantem
+# juncoes para a atual. Quem guardava o caminho versionado (o launcher do
+# autostart) seguia subindo o servidor antigo a cada logon, com tudo em PASS.
+function New-HerdrFalso {
+    $raiz = Join-Path ([System.IO.Path]::GetTempPath()) ("herdr-falso-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $r = @{
+        Raiz      = $raiz
+        Local     = Join-Path $raiz 'local'
+        Perfil    = Join-Path $raiz 'perfil'
+        Versao    = Join-Path $raiz 'perfil\.herdr\packages\standalone\releases\0.0.1-antiga'
+    }
+    foreach ($d in $r.Local, $r.Perfil, $r.Versao) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+    Set-Content -LiteralPath (Join-Path $r.Versao 'herdr.exe') -Value '' -Encoding ASCII
+    return $r
+}
+
+function Invoke-ComHerdrFalso($falso, [scriptblock]$corpo) {
+    $antes = @{ L = $env:LOCALAPPDATA; U = $env:USERPROFILE; P = $env:Path }
+    try {
+        $env:LOCALAPPDATA = $falso.Local
+        $env:USERPROFILE  = $falso.Perfil
+        # a pasta versionada na frente do PATH: e como um pane do Herdr enxerga
+        $env:Path         = "$($falso.Versao);$env:SystemRoot\System32"
+        & $corpo
+    } finally {
+        $env:LOCALAPPDATA = $antes.L; $env:USERPROFILE = $antes.U; $env:Path = $antes.P
+        Remove-Item -LiteralPath $falso.Raiz -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+It 'Get-HerdrPaths prefere o caminho estavel ao versionado do PATH' {
+    $f = New-HerdrFalso
+    $estavel = Join-Path $f.Local 'Programs\Herdr\bin'
+    New-Item -ItemType Directory -Path $estavel -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $estavel 'herdr.exe') -Value '' -Encoding ASCII
+    Invoke-ComHerdrFalso $f {
+        Assert-Equal (Join-Path $estavel 'herdr.exe') (Get-HerdrPaths).Exe 'pegou o binario versionado'
+    }
+}
+
+It 'Get-HerdrPaths cai no PATH quando nao ha instalacao no layout oficial' {
+    $f = New-HerdrFalso
+    Invoke-ComHerdrFalso $f {
+        Assert-Equal (Join-Path $f.Versao 'herdr.exe') (Get-HerdrPaths).Exe 'instalacao fora do layout nao foi achada'
+    }
+}
+
+It 'o launcher do Herdr resolve o binario a cada logon' {
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Install-Herdr.ps1') -Raw
+    Assert-True ($conteudo -match 'launcher-herdr: resolve-na-hora') 'marcador ausente: a verificacao nao distingue o launcher novo'
+    Assert-True ($conteudo -notmatch '\$exe = ''\$\(\$paths\.Exe\)''') 'o launcher voltou a embutir o caminho de hoje como unico'
+    # a lista do launcher e uma copia da lib: template isolado, sem modulo
+    foreach ($c in (Get-HerdrStableCandidates)) {
+        $sufixo = ($c -split '\\' | Select-Object -Last 4) -join '\'
+        Assert-True ($conteudo.Contains($sufixo)) "candidato da lib ausente no launcher: $sufixo"
+    }
+}
+
+It 'o launcher gerado escolhe o estavel e sobrevive a troca de versao' {
+    # Executa o launcher de verdade, contra um herdr falso que so registra quem
+    # foi chamado. E o teste que teria pego o defeito: os estaticos aprovavam.
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Install-Herdr.ps1') -Raw
+    $m = [regex]::Match($conteudo, "(?s)\`$conteudo = @'\r?\n(.*?)\r?\n'@")
+    Assert-True $m.Success 'here-string do launcher nao encontrado'
+
+    $f = New-HerdrFalso
+    $estavel = Join-Path $f.Local 'Programs\Herdr\bin'
+    New-Item -ItemType Directory -Path $estavel -Force | Out-Null
+    $marca = Join-Path $f.Raiz 'chamado.txt'
+    # herdr falso em .cmd: responde 'running' ao status e anota o proprio caminho
+    $cmdFalso = "@echo off`r`necho %~dp0>>`"$marca`"`r`necho status: running`r`n"
+    $corpo = $m.Groups[1].Value.Replace('herdr.exe', 'herdr.cmd').Replace('__EXE_FALLBACK__', (Join-Path $f.Versao 'herdr.cmd'))
+    Set-Content -LiteralPath (Join-Path $f.Versao 'herdr.cmd') -Value $cmdFalso -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $estavel  'herdr.cmd') -Value $cmdFalso -Encoding ASCII
+    $launcher = Join-Path $f.Raiz 'launcher.ps1'
+    Set-Content -LiteralPath $launcher -Value $corpo -Encoding ASCII
+
+    Invoke-ComHerdrFalso $f {
+        & $launcher
+        $quem = (Get-Content -LiteralPath $marca | Select-Object -Last 1).Trim().TrimEnd('\')
+        Assert-Equal $estavel $quem 'o launcher chamou o binario versionado'
+    }
+}
+
+It 'a verificacao acusa launcher antigo e servidor de versao diferente' {
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'Test-RustDeskSetup.ps1') -Raw
+    Assert-True ($conteudo -match 'launcher-herdr: resolve-na-hora') 'launcher antigo passaria em silencio'
+    Assert-True ($conteudo -match 'Get-HerdrServerVersion') 'versao do servidor no ar nao e conferida'
+}
+
+It 'o watchdog le a config em UTF-8 antes de regravar' {
+    $conteudo = Get-Content -LiteralPath (Join-Path $scriptsDir 'watchdog\rustdesk-watchdog.ps1') -Raw
+    Assert-True ($conteudo -notmatch '\$linhas\s*=\s*Get-Content \$cfg') 'Get-Content sem -Encoding le ANSI no PS 5.1'
+}
+
 It 'Setup.ps1 encaminha o prazo de inicializacao do Herdr' {
     $conteudo = Get-Content -LiteralPath (Join-Path $repoRaiz 'Setup.ps1') -Raw
     Assert-True ($conteudo -match '\$p\[''StartupTimeoutSeconds''\]\s*=\s*\$StartupTimeoutSeconds') `

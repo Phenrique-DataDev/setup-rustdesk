@@ -178,25 +178,50 @@ if ($NoAutostart) {
             # uma tarefa que aponta para o clone quebra quando a pasta e movida
             # ou apagada. Ele checa antes de subir - 'herdr server' com um
             # servidor ja no ar disputaria o mesmo socket.
-            $launcher = Join-Path $paths.ConfigDir 'start-herdr-server.ps1'
+            $launcher = $paths.Launcher
             if (-not (Test-Path -LiteralPath $paths.ConfigDir)) {
                 New-Item -ItemType Directory -Path $paths.ConfigDir -Force | Out-Null
             }
-            @"
+            # O launcher RESOLVE o binario a cada logon, em vez de carregar o
+            # caminho de hoje. O instalador do Herdr guarda cada versao em
+            # ...\releases\<versao>\ e so redireciona duas juncoes no update;
+            # com o caminho versionado embutido, a tarefa subia o servidor
+            # ANTIGO a cada logon, o cliente novo o derrubava ao abrir, e o
+            # servidor passava a viver como filho do terminal de quem abriu.
+            # Tudo com a verificacao em PASS. O caminho de hoje fica so como
+            # ultimo recurso, para instalacao fora do layout oficial.
+            #
+            # Here-string literal + .Replace(): nada de crase para escapar.
+            $conteudo = @'
 # Gerado por setup-rustdesk (scripts\Install-Herdr.ps1). Editar aqui e perder
 # na proxima execucao - mude o script do repositorio.
+# launcher-herdr: resolve-na-hora
 #
 # Sobe o servidor headless do Herdr, e so se nao houver um no ar: no logon a
 # situacao normal e nao haver, mas um logon rapido apos logoff pode pegar o
 # anterior ainda encerrando.
-`$exe = '$($paths.Exe)'
-if (-not (Test-Path -LiteralPath `$exe)) { exit 1 }
+$candidatos = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe'),
+    (Join-Path $env:USERPROFILE  '.herdr\packages\standalone\current\herdr.exe'),
+    '__EXE_FALLBACK__'
+)
+$exe = $null
+foreach ($c in $candidatos) {
+    if ($c -and (Test-Path -LiteralPath $c)) { $exe = $c; break }
+}
+if (-not $exe) {
+    $cmd = Get-Command herdr.exe -ErrorAction SilentlyContinue
+    if ($cmd) { $exe = $cmd.Source }
+}
+if (-not $exe) { exit 1 }
 
-`$status = & `$exe status server 2>&1 | Out-String
-if (`$status -match '(?m)^\s*status:\s*running') { exit 0 }
+$status = & $exe status server 2>&1 | Out-String
+if ($status -match '(?m)^\s*status:\s*running') { exit 0 }
 
-& `$exe server
-"@ | Set-Content -LiteralPath $launcher -Encoding UTF8
+& $exe server
+'@
+            $conteudo = $conteudo.Replace('__EXE_FALLBACK__', ($paths.Exe -replace "'", "''"))
+            Set-Content -LiteralPath $launcher -Value $conteudo -Encoding ASCII
             $log += "launcher materializado: $launcher"
 
             # 'herdr server' roda em foreground. A tarefa o embrulha num

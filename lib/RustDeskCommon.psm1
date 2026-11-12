@@ -170,6 +170,42 @@ function Get-RustDeskPaths {
     }
 }
 
+function Get-HerdrStableCandidates {
+    <#
+    .SYNOPSIS
+        Caminhos do herdr.exe que sobrevivem a um 'herdr update', em ordem.
+    .NOTES
+        As duas sao juncoes gerenciadas pelo instalador oficial
+        (distribution/install.ps1: visibleBinDir e currentDir). O launcher do
+        autostart carrega uma copia desta lista - ha teste que as mantem iguais.
+    #>
+    [CmdletBinding()] param()
+    return @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe'),
+        (Join-Path $env:USERPROFILE  '.herdr\packages\standalone\current\herdr.exe')
+    )
+}
+
+function Get-HerdrServerVersion {
+    <#
+    .SYNOPSIS
+        Versao do servidor do Herdr que esta no ar, ou $null se nao ha servidor.
+    .NOTES
+        Diferente de 'herdr --version': esta e a do PROCESSO em execucao. As duas
+        divergem quando o servidor subiu de um binario antigo.
+    #>
+    [CmdletBinding()] param()
+
+    $paths = Get-HerdrPaths
+    if (-not $paths.Installed) { return $null }
+    try {
+        $saida = & $paths.Exe status server 2>&1 | Out-String
+        if ($saida -notmatch '(?m)^\s*status:\s*running') { return $null }
+        if ($saida -match '(?m)^\s*version:\s*(\S+)') { return $Matches[1] }
+    } catch { }
+    return $null
+}
+
 function Get-HerdrPaths {
     <#
     .SYNOPSIS
@@ -181,17 +217,25 @@ function Get-HerdrPaths {
     #>
     [CmdletBinding()] param()
 
+    # Caminho ESTAVEL primeiro, PATH por ultimo. O instalador oficial guarda cada
+    # versao em ~\.herdr\packages\standalone\releases\<versao>\ e mantem duas
+    # juncoes apontando para a atual; 'herdr update' so as redireciona. Dentro de
+    # um pane do Herdr, e as vezes no PATH do usuario, o que resolve primeiro e a
+    # pasta VERSIONADA - e quem guarda esse caminho (o launcher do autostart)
+    # continua subindo a versao antiga depois de cada update, sem erro nenhum.
     $exe = $null
-    $cmd = Get-Command herdr.exe -ErrorAction SilentlyContinue
-    if ($cmd) { $exe = $cmd.Source }
+    foreach ($c in (Get-HerdrStableCandidates)) {
+        if (Test-Path -LiteralPath $c) { $exe = $c; break }
+    }
     if (-not $exe) {
-        $c = Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe'
-        if (Test-Path -LiteralPath $c) { $exe = $c }
+        $cmd = Get-Command herdr.exe -ErrorAction SilentlyContinue
+        if ($cmd) { $exe = $cmd.Source }
     }
 
     return [PSCustomObject]@{
         Exe        = $exe
         Installed  = [bool]$exe
+        Launcher   = Join-Path $env:APPDATA 'herdr\start-herdr-server.ps1'
         ConfigDir  = Join-Path $env:APPDATA 'herdr'
         Config     = Join-Path $env:APPDATA 'herdr\config.toml'
         Socket     = Join-Path $env:APPDATA 'herdr\herdr.sock'
@@ -665,6 +709,7 @@ function Start-RustDeskUI {
 }
 
 Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Get-HerdrPaths,
+                              Get-HerdrStableCandidates, Get-HerdrServerVersion,
                               Test-HerdrServer, Wait-HerdrServer, Import-RustDeskConfigFile,
                               Get-RustDeskPin, Get-RustDeskVersion, Resolve-RustDeskLatestVersion,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI,

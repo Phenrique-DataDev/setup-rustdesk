@@ -541,14 +541,37 @@ if (-not $SkipHerdr) {
 
         # o servidor e o ponto inteiro do Herdr aqui: sem ele, a queda da
         # conexao leva o trabalho junto
-        Test-Item 'servidor do Herdr no ar' $(if (Test-HerdrServer) { $true } else { 'aviso' }) `
-            $(if (Test-HerdrServer) { '' } else { 'suba com "herdr server" ou faca logoff/logon' })
+        $hSrvVer = Get-HerdrServerVersion
+        Test-Item 'servidor do Herdr no ar' $(if ($hSrvVer) { $true } else { 'aviso' }) `
+            $(if ($hSrvVer) { '' } else { 'suba com "herdr server" ou faca logoff/logon' })
+
+        # Servidor de versao diferente do binario = ele subiu de um caminho
+        # antigo. O cliente novo o derruba e sobe outro ao abrir, levando junto
+        # o que estivesse rodando. AVISO e nao FALHA: logo depois de um
+        # 'herdr update' isto e esperado ate o servidor ser reiniciado.
+        if ($hSrvVer) {
+            $hCliVer = try { ((& $hPaths.Exe --version 2>&1 | Out-String).Trim() -replace '^herdr\s+', '') } catch { '' }
+            if ($hCliVer) {
+                Test-Item 'servidor na mesma versao do binario' $(if ($hSrvVer -eq $hCliVer) { $true } else { 'aviso' }) `
+                    $(if ($hSrvVer -eq $hCliVer) { $hSrvVer }
+                      else { "servidor $hSrvVer, binario $hCliVer - o proximo cliente vai substituir o servidor" })
+            }
+        }
 
         # Get-ScheduledTask so enxerga tarefas do proprio usuario sem elevacao -
         # esta e do usuario, entao a consulta e confiavel aqui.
         $hTask = Get-ScheduledTask -TaskName $hPaths.TaskName -ErrorAction SilentlyContinue
         Test-Item 'autostart do servidor no logon' $(if ($hTask) { $true } else { 'aviso' }) `
             $(if ($hTask) { "tarefa '$($hPaths.TaskName)': $($hTask.State)" } else { "tarefa '$($hPaths.TaskName)' ausente - rode .\Setup.ps1 -Herdr" })
+
+        # A tarefa existir nao basta: o launcher antigo carregava o caminho
+        # versionado do herdr.exe e continuava subindo a versao de quando foi
+        # gerado. O marcador distingue o que resolve o binario a cada logon.
+        if ($hTask -and (Test-Path -LiteralPath $hPaths.Launcher)) {
+            $hLauncherOk = [bool](Select-String -LiteralPath $hPaths.Launcher -Pattern 'launcher-herdr: resolve-na-hora' -Quiet)
+            Test-Item 'launcher do autostart resolve o binario a cada logon' $(if ($hLauncherOk) { $true } else { 'aviso' }) `
+                $(if ($hLauncherOk) { '' } else { 'launcher antigo, com caminho de versao fixo: sobe o Herdr de quando foi gerado. Rode .\Setup.ps1 -Herdr' })
+        }
     }
 }
 

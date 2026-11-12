@@ -217,7 +217,10 @@ if ($svc) {
 
 foreach ($cfg in $cfgFiles) {
     if (-not (Test-Path $cfg)) { continue }
-    $linhas = Get-Content $cfg
+    # ReadAllLines com UTF-8 explicito, nao Get-Content: no PowerShell 5.1 (que e
+    # quem roda isto, como SYSTEM) Get-Content sem -Encoding le ANSI, e regravar
+    # em UTF-8 logo abaixo corromperia qualquer acento do arquivo.
+    $linhas = [System.IO.File]::ReadAllLines($cfg, [System.Text.Encoding]::UTF8)
     $achou  = $false
     $novo   = $linhas | ForEach-Object {
         if ($_ -match "^\s*stop-service\s*=\s*'Y'\s*$") { $achou = $true; "stop-service = 'N'" } else { $_ }
