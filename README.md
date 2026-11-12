@@ -127,6 +127,7 @@ Este repositório escreve nos dois arquivos e valida os dois.
 | `.\Setup.ps1 -Power` | Energia para notebook: tampa, suspensão, rede, daemon | **sim** |
 | `.\Setup.ps1 -Herdr` | Instala o Herdr, aplica a config e põe o servidor no logon | não |
 | `.\Setup.ps1 -Privacy` | Liga o privacy mode por padrão nas conexões que partem desta máquina | não |
+| `.\Setup.ps1 -HerdrApp` | **Opcional, fora do `-All`**: instala o Herdr app (janela) e o `hc`, confere as assinaturas e desliga a telemetria | não |
 | `.\scripts\Set-RustDeskPassword.ps1` | Define a senha permanente (sem eco) | **sim** |
 | `.\scripts\Get-PowerDiagnostics.ps1` | Coleta o estado de energia num relatório. Não altera nada. | não\*\* |
 | `.\scripts\Show-NetworkCheck.ps1` | Página no navegador com o botão *Verificar rede*. Não altera nada. | não |
@@ -391,8 +392,8 @@ painel de conexão do host, não o modo ligado.
 
 ### Versão fixada e atualizações desligadas
 
-A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.5.0` (última estável em
-2026-10-18). Sem pin, duas máquinas montadas com este repo em semanas diferentes acabam em
+A versão instalada é **fixada** em `config/version.psd1`, hoje a `1.5.3` (última estável em
+2026-11-12). Sem pin, duas máquinas montadas com este repo em semanas diferentes acabam em
 versões diferentes — o oposto de *clonou, pediu, funciona*.
 
 O instalador baixa o `.msi` da release do GitHub e **só executa depois de duas conferências**:
@@ -468,6 +469,11 @@ Firewall "RustDesk Service"          entrada liberada ao rustdesk.exe em todos o
 %APPDATA%\herdr\config.toml          config aplicada de config/herdr*.psd1
 %APPDATA%\herdr\start-herdr-server.ps1   launcher materializado (não editar)
 Tarefa "HerdrServer"                 usuário, no logon, sem limite de duração
+
+# só com .\Setup.ps1 -HerdrApp (opcional)
+%LOCALAPPDATA%\Programs\herdr-app\   a janela (instalador oficial, releases.herdr.dev)
+%LOCALAPPDATA%\Programs\herdr-core\  herdr-core.exe e hc.exe, o runtime dos terminais dela
+%USERPROFILE%\.config\herdr-app\settings.json   só a chave "telemetry": false é gravada
 ```
 
 Duas camadas de proteção, de propósito: as **recovery actions do SCM** cobrem quedas do
@@ -978,6 +984,57 @@ Por que `Interactive` e não SYSTEM: o servidor precisa viver na sessão do usu�
 (`SessionId 1`) para os agentes herdarem esse contexto. Na sessão 0 ele não serviria para
 nada aqui.
 
+**O launcher resolve o `herdr.exe` a cada logon**, pelos caminhos estáveis que o instalador
+mantém (`%LOCALAPPDATA%\Programs\Herdr\bin` e `~\.herdr\packages\standalone\current`), e
+só então pelo PATH. Até 2026-11-12 ele carregava o caminho **versionado** de quando foi
+gerado: depois de um `herdr update`, todo logon subia o servidor da versão antiga, e o
+primeiro cliente novo o derrubava para subir outro — levando o que estivesse rodando. A
+verificação acusa as duas pontas: `servidor na mesma versao do binario` e
+`launcher do autostart resolve o binario a cada logon`. Quem tem o launcher antigo corrige
+com `.\Setup.ps1 -Herdr`, que não reinicia o servidor.
+
+### Herdr app (a janela) — opcional
+
+O [Herdr app](https://github.com/herdrdev/herdr-app) é um produto **separado** do `herdr` de
+terminal: outro binário, outro runtime (`herdr-core`, comando `hc`), outro estado. Os
+terminais de um não aparecem no outro. Instalar um não substitui nem atrapalha o outro.
+
+```powershell
+.\Setup.ps1 -HerdrApp        # ou .\scripts\Install-HerdrApp.ps1 [-WhatIf] [-Update] [-KeepTelemetry]
+```
+
+Onde cada um serve nesta stack:
+
+| Você chega por | `herdr` (terminal) | Herdr app + `hc` |
+|---|---|---|
+| Área de trabalho remota | funciona dentro de um terminal | **janela com rolagem de verdade**, seleção e terminais lado a lado |
+| Terminal do RustDesk, tela bloqueada | **abas e panes desenhados no próprio terminal** | sem janela; `hc ls` e `hc attach <t>` alcançam os terminais (`Ctrl+\` solta) |
+| Logon | servidor sobe pela tarefa `HerdrServer` | nada no logon: o core sobe na primeira chamada de `hc` ou ao abrir a janela |
+| Depois de um reboot | panes voltam conforme a config | terminais mantidos voltam como **shells novos**, não os programas |
+
+Por isso o passo **não entra no `-All`** e não troca o `-Herdr`: o caso central do repo é o
+Terminal com a tela bloqueada, e ali o `hc` não desenha nada.
+
+O que o passo faz além do instalador oficial:
+
+- **Confere a assinatura Authenticode** do `herdr-app.exe` e do `herdr-core.exe` (`CN=herdr`)
+  e falha se não bater. O instalador oficial só confere SHA-256 contra um manifesto do
+  **mesmo** servidor — pega download corrompido, não binário trocado. Limite declarado: o
+  instalador do core executa `--version` do binário baixado antes de o passo poder conferir.
+- **Desliga a telemetria** (`"telemetry": false` no `settings.json`), que vem ligada de
+  fábrica. `-KeepTelemetry` mantém. Um `settings.json` ilegível não é regravado.
+- A verificação (`.\Setup.ps1`) ganha a seção *Herdr app* **só quando ele está instalado**,
+  e confere as assinaturas a cada rodada.
+
+O que o passo **não** controla: o app se atualiza sozinho, e atualiza o core junto. Não há
+opção para desligar — o oposto do pin de versão do RustDesk. É por isso que a assinatura é
+conferida a cada verificação, e não só na instalação.
+
+Validado em 2026-11-12 na máquina de referência (app 0.1.15, core 0.1.20): instalação,
+assinaturas, `hc run --bg --keep`, `hc ls`/`read`/`send`, e um terminal criado pelo `hc`
+sobrevivendo à abertura e ao fechamento da janela, dentro de uma sessão do RustDesk. **Não
+validado:** `hc attach` pelo Terminal do RustDesk com a tela bloqueada — ver `BACKLOG.md`.
+
 ### Configuração recomendada
 
 As opções vivem em `config/herdr.psd1` e são aplicadas por
@@ -1123,6 +1180,7 @@ scripts/Set-PowerConfig.ps1     plano de energia e adaptador de rede (só notebo
 scripts/Install-AwakeGuard.ps1  daemon que segura a suspensão durante a sessão
 scripts/Get-PowerDiagnostics.ps1  coletor read-only para o retorno do ocioso
 scripts/Install-Herdr.ps1       instalador oficial + servidor no logon
+scripts/Install-HerdrApp.ps1    opcional: Herdr app + hc, assinatura e telemetria
 scripts/Set-HerdrConfig.ps1     aplica as opções no config.toml do Herdr
 scripts/Show-AgentTranscript.ps1  lê o histórico do agente num pager
 scripts/Show-NetworkCheck.ps1   serve a página "Verificar rede" e roda as checagens
@@ -1159,7 +1217,7 @@ não Wayland.
 - Privilégios de Administrador para instalar e configurar o RustDesk (o passo do Herdr não
   eleva)
 - Acesso à internet para os dois instaladores (`github.com` para o `.msi` do RustDesk,
-  `herdr.dev` para o Herdr). Sem ele, use `-SkipInstall` / `-SkipHerdrInstall` sobre
+  `herdr.dev` para o Herdr, `releases.herdr.dev` para o Herdr app opcional). Sem ele, use `-SkipInstall` / `-SkipHerdrInstall` sobre
   instalações existentes.
 - **`winget` não é mais necessário.** O pacote `RustDesk.RustDesk` foi retirado do
   repositório winget, então a instalação baixa o `.msi` direto da release — o que também é
@@ -1180,6 +1238,20 @@ Coisas que custaram tempo para descobrir e estão codificadas aqui:
   e a verificação aceita. **Encontrado em 2026-09-25**, na máquina de referência, cinco dias
   depois de o serviço ser parado pela interface.
 
+- **`powershell.exe` iniciado de dentro do `pwsh` 7 perde `Expand-Archive`, `Get-FileHash` e
+  `Get-AuthenticodeSignature`.** O 5.1 herda o `PSModulePath` do pai, com a pasta de módulos
+  do 7 **na frente** da dele, tenta carregar `Microsoft.PowerShell.Archive`/`.Utility`/
+  `.Security` na versão do 7 e falha — *"o módulo não pôde ser carregado"*, *"não é
+  reconhecido como nome de cmdlet"*, *"sobrecarga para ExtractToDirectory"*. Os instaladores
+  de terceiros rodam exatamente assim (um `powershell.exe` filho), e o do Herdr usa
+  `Expand-Archive`: com o setup partindo do `pwsh` 7, a instalação morria ali. Agora
+  `Start-WindowsPowerShellFile` limpa o `PSModulePath` do filho, e a lib limpa o da própria
+  sessão quando ela **é** um 5.1 nessas condições. **Encontrado em 2026-11-12**; há teste de
+  regressão que roda os três cmdlets num filho de verdade.
+- **O launcher do Herdr não pode carregar caminho de versão.** O instalador do Herdr põe o
+  binário em `releases\<versão>\` e mantém junctions estáveis; o PATH do usuário aponta para
+  a pasta versionada. Resolver `herdr.exe` **na hora de gerar** o launcher congelava a versão
+  no autostart. Ver [Instalação e autostart](#instalação-e-autostart).
 - **`[uint32]0x80000000` estoura em PowerShell.** O literal hexadecimal é lido como `Int32`
   (-2147483648) e o cast falha com *Value was either too large or too small for a UInt32*.
   Essa é a constante `ES_CONTINUOUS` do `SetThreadExecutionState` — com ela, o daemon morria

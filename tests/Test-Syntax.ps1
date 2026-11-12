@@ -27,10 +27,29 @@ $raiz = Split-Path -Parent $PSScriptRoot
 # inteiro (BACKLOG.md, ci.yml, docs/linux.md vao parar no parser). No pwsh 7 o
 # filtro funciona, entao a divergencia so aparece na maquina real.
 $extensoes = '.ps1', '.psm1', '.psd1'
-$arquivos = Get-ChildItem -LiteralPath $raiz -Recurse -File |
-            Where-Object { $extensoes -contains $_.Extension } |
-            Where-Object { $_.FullName.Split([IO.Path]::DirectorySeparatorChar) -notcontains '.git' } |
-            Sort-Object FullName
+
+# So o que e do repositorio. Varrer a arvore inteira pegava tambem o que o
+# .gitignore exclui - clones de terceiros em externos/, por exemplo, que tem
+# acento e reprovavam a checagem de ASCII na maquina sem nunca reprovar no CI,
+# onde essas pastas nao existem. Um teste que so falha localmente ensina a
+# ignorar a falha. --others --exclude-standard mantem na conta o arquivo novo
+# que ainda nao foi adicionado.
+$doGit = $null
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $saida = & git -C $raiz ls-files --cached --others --exclude-standard 2>$null
+    if ($LASTEXITCODE -eq 0 -and $saida) {
+        $doGit = @($saida | ForEach-Object { Join-Path $raiz ($_ -replace '/', [IO.Path]::DirectorySeparatorChar) })
+    }
+}
+$arquivos = if ($doGit) {
+                $doGit | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+                    ForEach-Object { Get-Item -LiteralPath $_ -Force }
+            } else {
+                # sem git (zip baixado): arvore inteira, como antes
+                Get-ChildItem -LiteralPath $raiz -Recurse -File |
+                    Where-Object { $_.FullName.Split([IO.Path]::DirectorySeparatorChar) -notcontains '.git' }
+            }
+$arquivos = @($arquivos | Where-Object { $extensoes -contains $_.Extension } | Sort-Object FullName)
 
 if ($arquivos.Count -eq 0) { throw 'nenhum arquivo PowerShell encontrado' }
 

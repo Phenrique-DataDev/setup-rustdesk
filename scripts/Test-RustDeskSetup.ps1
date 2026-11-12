@@ -541,15 +541,74 @@ if (-not $SkipHerdr) {
 
         # o servidor e o ponto inteiro do Herdr aqui: sem ele, a queda da
         # conexao leva o trabalho junto
-        Test-Item 'servidor do Herdr no ar' $(if (Test-HerdrServer) { $true } else { 'aviso' }) `
-            $(if (Test-HerdrServer) { '' } else { 'suba com "herdr server" ou faca logoff/logon' })
+        $hSrvVer = Get-HerdrServerVersion
+        Test-Item 'servidor do Herdr no ar' $(if ($hSrvVer) { $true } else { 'aviso' }) `
+            $(if ($hSrvVer) { '' } else { 'suba com "herdr server" ou faca logoff/logon' })
+
+        # Servidor de versao diferente do binario = ele subiu de um caminho
+        # antigo. O cliente novo o derruba e sobe outro ao abrir, levando junto
+        # o que estivesse rodando. AVISO e nao FALHA: logo depois de um
+        # 'herdr update' isto e esperado ate o servidor ser reiniciado.
+        if ($hSrvVer) {
+            $hCliVer = try { ((& $hPaths.Exe --version 2>&1 | Out-String).Trim() -replace '^herdr\s+', '') } catch { '' }
+            if ($hCliVer) {
+                Test-Item 'servidor na mesma versao do binario' $(if ($hSrvVer -eq $hCliVer) { $true } else { 'aviso' }) `
+                    $(if ($hSrvVer -eq $hCliVer) { $hSrvVer }
+                      else { "servidor $hSrvVer, binario $hCliVer - o proximo cliente vai substituir o servidor" })
+            }
+        }
 
         # Get-ScheduledTask so enxerga tarefas do proprio usuario sem elevacao -
         # esta e do usuario, entao a consulta e confiavel aqui.
         $hTask = Get-ScheduledTask -TaskName $hPaths.TaskName -ErrorAction SilentlyContinue
         Test-Item 'autostart do servidor no logon' $(if ($hTask) { $true } else { 'aviso' }) `
             $(if ($hTask) { "tarefa '$($hPaths.TaskName)': $($hTask.State)" } else { "tarefa '$($hPaths.TaskName)' ausente - rode .\Setup.ps1 -Herdr" })
+
+        # A tarefa existir nao basta: o launcher antigo carregava o caminho
+        # versionado do herdr.exe e continuava subindo a versao de quando foi
+        # gerado. O marcador distingue o que resolve o binario a cada logon.
+        if ($hTask -and (Test-Path -LiteralPath $hPaths.Launcher)) {
+            $hLauncherOk = [bool](Select-String -LiteralPath $hPaths.Launcher -Pattern 'launcher-herdr: resolve-na-hora' -Quiet)
+            Test-Item 'launcher do autostart resolve o binario a cada logon' $(if ($hLauncherOk) { $true } else { 'aviso' }) `
+                $(if ($hLauncherOk) { '' } else { 'launcher antigo, com caminho de versao fixo: sobe o Herdr de quando foi gerado. Rode .\Setup.ps1 -Herdr' })
+        }
     }
+}
+
+# --- Herdr app (opcional) ----------------------------------------------
+# So aparece se estiver instalado: e opt-in (.\Setup.ps1 -HerdrApp) e a
+# ausencia nao e defeito. O que vale conferir a cada rodada e a assinatura -
+# o app se atualiza sozinho, entao o binario de hoje nao e o da instalacao.
+$aPaths = Get-HerdrAppPaths
+if (-not $SkipHerdr -and $aPaths.Installed) {
+    Write-Host ''
+    Write-Host 'Herdr app (janela, opcional)' -ForegroundColor Cyan
+    $aSig = Test-HerdrAppSignature -Path $aPaths.AppExe -SignerSubject $aPaths.SignerSubject
+    Test-Item 'herdr-app.exe assinado pelo Herdr' $aSig.Ok $aSig.Detalhe
+
+    if ($aPaths.CoreInstalled) {
+        $cSig = Test-HerdrAppSignature -Path $aPaths.CoreExe -SignerSubject $aPaths.SignerSubject
+        Test-Item 'herdr-core.exe assinado pelo Herdr' $cSig.Ok $cSig.Detalhe
+    } else {
+        Test-Item 'herdr-core (hc) instalado' 'aviso' 'sem ele a janela nao abre terminal - rode .\Setup.ps1 -HerdrApp'
+    }
+
+    # Desligada = a chave existe e vale false. Ausente e ligada (padrao do app).
+    # Variavel de ambiente tambem desliga, mas so para quem a herda.
+    $aTel = 'ligada (padrao do app)'
+    $aTelOff = $false
+    if ($env:HERDR_TELEMETRY -eq '0' -or $env:DO_NOT_TRACK -eq '1') {
+        $aTelOff = $true; $aTel = 'desligada por variavel de ambiente'
+    } elseif (Test-Path -LiteralPath $aPaths.Settings) {
+        try {
+            $aJson = [System.IO.File]::ReadAllText($aPaths.Settings, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($aJson -and ($aJson.PSObject.Properties.Name -contains 'telemetry') -and $aJson.telemetry -eq $false) {
+                $aTelOff = $true; $aTel = ''
+            }
+        } catch { $aTel = 'settings.json ilegivel - confira em Settings > Privacy' }
+    }
+    Test-Item 'telemetria do Herdr app desligada' $(if ($aTelOff) { $true } else { 'aviso' }) `
+        $(if ($aTelOff) { $aTel } else { "$aTel - rode .\Setup.ps1 -HerdrApp" })
 }
 
 # --- logs --------------------------------------------------------------

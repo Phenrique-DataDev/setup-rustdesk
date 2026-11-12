@@ -25,6 +25,11 @@ hash SHA-256 e assinatura Authenticode. O README passou a documentar o workflow 
 com teste manual de `Win+L`; os itens 0, 1 e 2 continuam pendentes por falta da execução em
 uma máquina Windows zerada/notebook.
 
+Revisado em **2026-11-12**: o pin do RustDesk subiu para **1.5.3** (release de 2026-11-09) após
+conferência do MSI, hash SHA-256 e assinatura Authenticode. A máquina de referência **continua
+na 1.5.0**: atualizar exige Administrador e derruba a sessão em curso. O `actions/checkout` do CI
+já estava na última (`v7.0.1`).
+
 Revisado em **2026-11-02**: o privacy mode virou padrão do `-All`. Entrou o item **10**, porque o
 recurso foi conferido no código e em testes, mas nunca numa sessão real.
 
@@ -145,6 +150,16 @@ but the module could not be loaded.
 Isso é limitação do ambiente, não do repo — o `Install-Herdr.ps1` baixou, validou e chamou
 o instalador corretamente. Testar de verdade exige **uma VM Windows com imagem completa**
 (Hyper-V com ISO), não o Sandbox.
+
+**Revisão de 2026-11-12 — a conclusão acima pode estar errada.** A mesma classe de erro foi
+reproduzida fora do Sandbox: um `powershell.exe` (5.1) iniciado de dentro do `pwsh` 7 herda o
+`PSModulePath` do pai e não consegue carregar `Microsoft.PowerShell.Archive`, `.Utility` nem
+`.Security`. Isso **era** defeito do repo — `Install-Herdr.ps1` chama o instalador num
+`powershell.exe` filho — e foi corrigido (`Start-WindowsPowerShellFile`, com teste de
+regressão). O que **não** está provado é que o Sandbox falhava pelo mesmo motivo: o `.wsb`
+daquela rodada chamava o `powershell.exe` direto, sem `pwsh` no meio, e a mensagem de lá é
+em inglês e de outro texto. É uma hipótese a testar, não um fechamento: vale repetir o
+Sandbox antes de montar a VM com ISO.
 
 O segundo falhou no Sandbox com `os error 2`, mas por causa do item 2 abaixo, então não há
 conclusão sobre ele.
@@ -454,7 +469,34 @@ confirmou o host anunciando *Mode 1* e *Mode 2*. Foi testado contra um `APPDATA`
 
 ---
 
+## 11. O Herdr app só foi exercitado pela área de trabalho
+
+Escrito em 2026-11-12, junto com o passo opcional `-HerdrApp`. Rodou de verdade na máquina de
+referência: instalação pelo instalador oficial, assinaturas, telemetria, `hc run`/`ls`/`read`/
+`send`, e a janela abrindo dentro de uma sessão do RustDesk sem derrubar um terminal criado
+pelo `hc`. O que ficou de fora:
+
+| O quê | Por que importa |
+|---|---|
+| `hc attach <t>` pelo **Terminal do RustDesk com a tela bloqueada** | É o cenário central do repo, e `attach` é interativo — os testes daqui só usaram comandos que retornam. |
+| O core depois de **logoff/logon e reboot** | A doc do app diz que terminais mantidos voltam como shells novos; não foi observado. Nada o sobe no logon. |
+| Uma **atualização automática** do app chegando com terminais abertos | O app atualiza a si e ao core sem opção de desligar. A verificação reconfere a assinatura, mas ninguém viu o que acontece com os terminais. |
+| `HERDR_APP_HOME` comprido | Falha com *path must be shorter than SUN_LEN*. O padrão (`~\.config\herdr-app`) é curto; um perfil com caminho longo pode bater nisso. |
+
+Se o primeiro item funcionar, o `hc` vira alternativa real ao `herdr` de terminal para quem
+só quer manter processos vivos, e a tabela do README merece uma linha a mais.
+
+---
+
 ## Ideias, não compromissos
+
+- **A verificação diária sem elevação termina com 5 `AVISO requer Administrador`.** É o
+  comando mais usado do repo e a saída nunca é limpa. Opções: uma tarefa de SYSTEM que grava
+  um resumo legível pelo usuário (o watchdog já lê tudo isso), ou um `-Elevate` que reabre só
+  a verificação elevada. Anotado em 2026-11-12, sem implementação.
+- **O Herdr instalado pode estar no canal `preview`** atrás da estável (0.9.4-preview com a
+  0.9.5 já publicada, em 2026-11-12). A verificação não olha canal nem versão do Herdr; um
+  AVISO de "há versão mais nova" seria barato, mas depende de rede.
 
 - ~~O repositório virou público sem LICENSE.~~ **Feito em 2026-08-11**: sem arquivo de
   licença o default legal é "todos os direitos reservados" — ninguém podia clonar nem
