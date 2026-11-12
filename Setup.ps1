@@ -38,6 +38,11 @@
     NAO precisa de Administrador.
 
 .EXAMPLE
+    .\Setup.ps1 -HerdrApp
+    Opcional, fora do -All: instala o Herdr app (a janela) e o herdr-core,
+    confere as assinaturas e desliga a telemetria. NAO precisa de Administrador.
+
+.EXAMPLE
     .\Setup.ps1 -Privacy
     So o privacy mode: liga como padrao para os peers desta maquina (a que
     controla). NAO precisa de Administrador.
@@ -54,6 +59,7 @@ param(
     [switch]$Power,
     [switch]$SkipPower,
     [switch]$Herdr,
+    [switch]$HerdrApp,   # opcional e fora do -All: a janela do Herdr + herdr-core (hc)
     [switch]$Privacy,
     [switch]$SkipPrivacy,
     [switch]$Test,
@@ -82,7 +88,7 @@ if ($All) {
 }
 
 # nada pedido: so verifica, que e a acao segura
-if (-not ($Install -or $Configure -or $Watchdog -or $Power -or $Herdr -or $Privacy -or $Test)) { $Test = $true }
+if (-not ($Install -or $Configure -or $Watchdog -or $Power -or $Herdr -or $HerdrApp -or $Privacy -or $Test)) { $Test = $true }
 
 # Herdr e privacy mode ficam de fora: moram no perfil do usuario e nao elevam
 $precisaAdmin = $Install -or $Configure -or $Watchdog -or $Power
@@ -99,7 +105,7 @@ if ($precisaAdmin -and -not (Test-Elevated)) {
 # A numeracao era literal ('1/5'...'6/6') e passou a mentir assim que o passo de
 # energia virou condicional. Contar antes e o unico jeito de o titulo bater com o
 # que vai rodar de fato.
-$totalPassos = @($Install, $Configure, $Watchdog, $Power, $Herdr, $Privacy, [bool]$Password, $Test |
+$totalPassos = @($Install, $Configure, $Watchdog, $Power, $Herdr, $HerdrApp, $Privacy, [bool]$Password, $Test |
                  Where-Object { $_ }).Count
 $passoAtual  = 0
 
@@ -149,6 +155,14 @@ if ($Herdr) {
     $p = @{}
     if ($HerdrConfigFile) { $p['ConfigFile'] = $HerdrConfigFile }
     & (Join-Path $PSScriptRoot 'scripts\Set-HerdrConfig.ps1') @p
+}
+
+# Fora do -All de proposito: e um produto separado do 'herdr' de terminal, novo
+# (0.1.x), que se atualiza sozinho. Quem quer a janela pede; ninguem a ganha de
+# brinde num setup de acesso remoto.
+if ($HerdrApp) {
+    Write-Passo 'Instalando o Herdr app (janela) e o herdr-core'
+    & (Join-Path $PSScriptRoot 'scripts\Install-HerdrApp.ps1')
 }
 
 # Privacy mode e pedido por quem conecta, entao este passo mexe na config de

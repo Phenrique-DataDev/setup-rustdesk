@@ -575,6 +575,42 @@ if (-not $SkipHerdr) {
     }
 }
 
+# --- Herdr app (opcional) ----------------------------------------------
+# So aparece se estiver instalado: e opt-in (.\Setup.ps1 -HerdrApp) e a
+# ausencia nao e defeito. O que vale conferir a cada rodada e a assinatura -
+# o app se atualiza sozinho, entao o binario de hoje nao e o da instalacao.
+$aPaths = Get-HerdrAppPaths
+if (-not $SkipHerdr -and $aPaths.Installed) {
+    Write-Host ''
+    Write-Host 'Herdr app (janela, opcional)' -ForegroundColor Cyan
+    $aSig = Test-HerdrAppSignature -Path $aPaths.AppExe -SignerSubject $aPaths.SignerSubject
+    Test-Item 'herdr-app.exe assinado pelo Herdr' $aSig.Ok $aSig.Detalhe
+
+    if ($aPaths.CoreInstalled) {
+        $cSig = Test-HerdrAppSignature -Path $aPaths.CoreExe -SignerSubject $aPaths.SignerSubject
+        Test-Item 'herdr-core.exe assinado pelo Herdr' $cSig.Ok $cSig.Detalhe
+    } else {
+        Test-Item 'herdr-core (hc) instalado' 'aviso' 'sem ele a janela nao abre terminal - rode .\Setup.ps1 -HerdrApp'
+    }
+
+    # Desligada = a chave existe e vale false. Ausente e ligada (padrao do app).
+    # Variavel de ambiente tambem desliga, mas so para quem a herda.
+    $aTel = 'ligada (padrao do app)'
+    $aTelOff = $false
+    if ($env:HERDR_TELEMETRY -eq '0' -or $env:DO_NOT_TRACK -eq '1') {
+        $aTelOff = $true; $aTel = 'desligada por variavel de ambiente'
+    } elseif (Test-Path -LiteralPath $aPaths.Settings) {
+        try {
+            $aJson = [System.IO.File]::ReadAllText($aPaths.Settings, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($aJson -and ($aJson.PSObject.Properties.Name -contains 'telemetry') -and $aJson.telemetry -eq $false) {
+                $aTelOff = $true; $aTel = ''
+            }
+        } catch { $aTel = 'settings.json ilegivel - confira em Settings > Privacy' }
+    }
+    Test-Item 'telemetria do Herdr app desligada' $(if ($aTelOff) { $true } else { 'aviso' }) `
+        $(if ($aTelOff) { $aTel } else { "$aTel - rode .\Setup.ps1 -HerdrApp" })
+}
+
 # --- logs --------------------------------------------------------------
 if ($ShowLogs) {
     Write-Host ''

@@ -5,6 +5,77 @@
 
 Set-StrictMode -Version Latest
 
+# Quando ESTA sessao e o 5.1 filho de um pwsh 7 (alguem digitou 'powershell
+# -File Setup.ps1' num terminal do 7), Get-FileHash e Get-AuthenticodeSignature
+# falham aqui mesmo, e sao eles que conferem o .msi do RustDesk antes de
+# executar. Limpar na carga do modulo cobre todos os scripts de uma vez. A
+# funcao e definida mais abaixo, entao a chamada fica no fim do arquivo.
+
+function Get-WindowsPowerShellModulePath {
+    <#
+    .SYNOPSIS
+        PSModulePath sem as pastas de modulos embutidos do PowerShell 7.
+    .DESCRIPTION
+        Um powershell.exe (5.1) iniciado de dentro do pwsh 7 herda o
+        PSModulePath do pai, e nele a pasta de modulos do 7 vem ANTES da do
+        5.1. O 5.1 entao tenta carregar Microsoft.PowerShell.Archive, .Utility
+        e .Security na versao do 7, e falha:
+          - Expand-Archive: 'Nao e possivel localizar uma sobrecarga para
+            ExtractToDirectory';
+          - Get-FileHash: 'nao e reconhecido como nome de cmdlet';
+          - Get-AuthenticodeSignature: 'nao foi possivel carregar o modulo'.
+        Reproduzido nesta ordem numa maquina com pwsh 7 da Store. O instalador
+        oficial do Herdr usa Expand-Archive e roda num powershell.exe filho:
+        com o setup partindo do pwsh 7, a instalacao morria ali.
+    .NOTES
+        O criterio e o conteudo, nao o nome: a pasta do 7 muda de lugar entre
+        o MSI ('...\PowerShell\7\Modules') e a Store ('...\WindowsApps\...').
+        E do 7 a pasta que tem Microsoft.PowerShell.Security e nao esta sob
+        WindowsPowerShell. As pastas de modulos de usuario ficam.
+    #>
+    [CmdletBinding()] param()
+
+    $limpas = foreach ($e in ($env:PSModulePath -split ';')) {
+        if (-not $e) { continue }
+        $doCore = ($e -notmatch '\\WindowsPowerShell\\') -and
+                  (Test-Path -LiteralPath (Join-Path $e 'Microsoft.PowerShell.Security'))
+        if (-not $doCore) { $e }
+    }
+    return (@($limpas) -join ';')
+}
+
+function Start-WindowsPowerShellFile {
+    <#
+    .SYNOPSIS
+        Roda um .ps1 num powershell.exe (5.1) separado, com a saida em arquivo.
+    .DESCRIPTION
+        E como os instaladores de terceiros sao executados aqui: processo
+        proprio, para o que eles fazem com PATH e variaveis nao vazar para esta
+        sessao, e saida capturada, para uma falha nao virar so "codigo 1".
+        O PSModulePath do filho e limpo antes - ver Get-WindowsPowerShellModulePath.
+    .OUTPUTS
+        O processo, ja encerrado (ExitCode disponivel).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$File,
+        [Parameter(Mandatory)][string]$StdOut,
+        [Parameter(Mandatory)][string]$StdErr
+    )
+
+    $antes = $env:PSModulePath
+    try {
+        $env:PSModulePath = Get-WindowsPowerShellModulePath
+        # aspas no caminho: Start-Process junta os argumentos com espaco e um
+        # perfil com espaco no nome partiria o -File em dois
+        return Start-Process -FilePath 'powershell.exe' -Wait -PassThru -NoNewWindow `
+                    -RedirectStandardOutput $StdOut -RedirectStandardError $StdErr `
+                    -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$File`"")
+    } finally {
+        $env:PSModulePath = $antes
+    }
+}
+
 function Test-Elevated {
     <#
     .SYNOPSIS
@@ -243,6 +314,116 @@ function Get-HerdrPaths {
         ClientLog  = Join-Path $env:APPDATA 'herdr\herdr-client.log'
         TaskName   = 'HerdrServer'
     }
+}
+
+function Get-HerdrAppPaths {
+    <#
+    .SYNOPSIS
+        Caminhos do Herdr app (janela) e do herdr-core (hc) que ele usa.
+    .DESCRIPTION
+        Produto SEPARADO do 'herdr' de terminal que o resto deste repositorio
+        instala: outro binario, outro runtime (herdr-core), outro estado. Um nao
+        enxerga os terminais do outro. E opcional - Installed $false significa
+        apenas que o passo -HerdrApp nunca rodou.
+    .NOTES
+        A pasta do app segue a regra dele: HERDR_APP_HOME, senao
+        XDG_CONFIG_HOME\herdr-app, senao ~\.config\herdr-app (tambem no Windows).
+    #>
+    [CmdletBinding()] param()
+
+    $appExe  = Join-Path $env:LOCALAPPDATA 'Programs\herdr-app\herdr-app.exe'
+    $coreExe = Join-Path $env:LOCALAPPDATA 'Programs\herdr-core\herdr-core.exe'
+    if (-not (Test-Path -LiteralPath $coreExe)) {
+        $cmd = Get-Command herdr-core.exe -ErrorAction SilentlyContinue
+        if ($cmd) { $coreExe = $cmd.Source }
+    }
+
+    $appHome = if ($env:HERDR_APP_HOME)      { $env:HERDR_APP_HOME }
+               elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'herdr-app' }
+               else                          { Join-Path $env:USERPROFILE '.config\herdr-app' }
+
+    return [PSCustomObject]@{
+        AppExe        = $appExe
+        Installed     = (Test-Path -LiteralPath $appExe)
+        CoreExe       = $coreExe
+        CoreInstalled = (Test-Path -LiteralPath $coreExe)
+        AppHome       = $appHome
+        Settings      = Join-Path $appHome 'settings.json'
+        # o certificado que assina app e core nas releases oficiais
+        SignerSubject = 'CN=herdr,'
+    }
+}
+
+function Test-HerdrAppSignature {
+    <#
+    .SYNOPSIS
+        Confere a assinatura Authenticode de um binario do Herdr app/core.
+    .OUTPUTS
+        Objeto com Ok e Detalhe. Nunca lanca: quem chama decide o que fazer.
+    .NOTES
+        O instalador oficial so confere SHA-256 contra um manifesto do MESMO
+        servidor - isso pega download corrompido, nao troca de binario. A
+        assinatura e a unica verificacao independente do servidor de release.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$SignerSubject = 'CN=herdr,'
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [PSCustomObject]@{ Ok = $false; Detalhe = "nao encontrado: $Path" }
+    }
+    $sig = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($sig.Status -ne 'Valid') {
+        return [PSCustomObject]@{ Ok = $false; Detalhe = "assinatura $($sig.Status)" }
+    }
+    $sujeito = [string]$sig.SignerCertificate.Subject
+    if ($sujeito -notlike "*$SignerSubject*") {
+        return [PSCustomObject]@{ Ok = $false; Detalhe = "assinado por quem nao se esperava: $sujeito" }
+    }
+    return [PSCustomObject]@{ Ok = $true; Detalhe = $sujeito }
+}
+
+function Disable-HerdrAppTelemetry {
+    <#
+    .SYNOPSIS
+        Grava "telemetry": false no settings.json do Herdr app.
+    .DESCRIPTION
+        So essa chave: o resto do arquivo e de quem usa o app e e preservado.
+    .OUTPUTS
+        'ja' | 'desligada' | 'simulado' | 'ilegivel'
+    .NOTES
+        Um arquivo que nao se consegue ler NAO e regravado: perder as
+        preferencias de alguem para desligar um contador nao compensa.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][string]$Settings)
+
+    $atual = $null
+    if (Test-Path -LiteralPath $Settings) {
+        try {
+            $atual = [System.IO.File]::ReadAllText($Settings, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        } catch {
+            return 'ilegivel'
+        }
+        # 'null', numero ou lista sao JSON valido e nao sao um settings.json
+        if ($null -eq $atual -or $atual -isnot [System.Management.Automation.PSCustomObject]) { return 'ilegivel' }
+    }
+
+    if ($atual -and ($atual.PSObject.Properties.Name -contains 'telemetry') -and $atual.telemetry -eq $false) {
+        return 'ja'
+    }
+    if (-not $PSCmdlet.ShouldProcess($Settings, 'gravar telemetry = false')) { return 'simulado' }
+
+    if (-not $atual) { $atual = [PSCustomObject]@{} }
+    $atual | Add-Member -NotePropertyName telemetry -NotePropertyValue $false -Force
+    $dir = Split-Path -Parent $Settings
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    # UTF-8 sem BOM: Set-Content -Encoding UTF8 no PS 5.1 gravaria BOM.
+    [System.IO.File]::WriteAllText($Settings, (($atual | ConvertTo-Json -Depth 20) + "`n"),
+        (New-Object System.Text.UTF8Encoding($false)))
+    return 'desligada'
 }
 
 function Test-HerdrServer {
@@ -708,8 +889,14 @@ function Start-RustDeskUI {
     return $log
 }
 
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    $env:PSModulePath = Get-WindowsPowerShellModulePath
+}
+
 Export-ModuleMember -Function Test-Elevated, Assert-Elevated, Get-RustDeskPaths, Get-HerdrPaths,
+                              Get-WindowsPowerShellModulePath, Start-WindowsPowerShellFile,
                               Get-HerdrStableCandidates, Get-HerdrServerVersion,
+                              Get-HerdrAppPaths, Test-HerdrAppSignature, Disable-HerdrAppTelemetry,
                               Test-HerdrServer, Wait-HerdrServer, Import-RustDeskConfigFile,
                               Get-RustDeskPin, Get-RustDeskVersion, Resolve-RustDeskLatestVersion,
                               Stop-RustDeskClean, Start-RustDeskClean, Start-RustDeskUI,

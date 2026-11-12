@@ -888,7 +888,147 @@ It 'Setup.ps1 -All liga o privacy mode e -SkipPrivacy desliga o passo' {
     $src = Get-Content -Raw -LiteralPath (Join-Path $repoRaiz 'Setup.ps1')
     Assert-True ($src -match '\$Privacy = -not \$SkipPrivacy') 'o -All nao liga o passo'
     Assert-True ($src -match 'Enable-PrivacyMode\.ps1') 'o passo nao chama o script'
-    Assert-True ($src -match '\$Herdr, \$Privacy, \[bool\]\$Password') 'o passo fica fora da contagem'
+    Assert-True ($src -match '\$HerdrApp, \$Privacy, \[bool\]\$Password') 'o passo fica fora da contagem'
+}
+
+Write-Host ''
+Write-Host '=== Testes: powershell.exe filho do pwsh 7 ===' -ForegroundColor Cyan
+
+# O 5.1 iniciado de dentro do pwsh 7 herda o PSModulePath do pai e carrega os
+# modulos embutidos do 7, que falham nele. O instalador do Herdr roda assim.
+It 'o powershell.exe filho consegue Expand-Archive, Get-FileHash e assinatura' {
+    $d = Join-Path ([System.IO.Path]::GetTempPath()) ("ps51-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $d -Force | Out-Null
+    try {
+        Set-Content -LiteralPath (Join-Path $d 'a.txt') -Value 'x' -Encoding ASCII
+        Compress-Archive -Path (Join-Path $d 'a.txt') -DestinationPath (Join-Path $d 'a.zip') -Force
+        $ps1 = Join-Path $d 'filho.ps1'
+        @(
+            '$ErrorActionPreference = "Stop"'
+            "Expand-Archive -LiteralPath '$d\a.zip' -DestinationPath '$d\saida' -Force"
+            "`$null = Get-FileHash -LiteralPath '$d\a.zip'"
+            "`$null = Get-AuthenticodeSignature -LiteralPath '$d\a.zip'"
+            'exit 0'
+        ) | Set-Content -LiteralPath $ps1 -Encoding ASCII
+        $p = Start-WindowsPowerShellFile -File $ps1 -StdOut (Join-Path $d 'o.txt') -StdErr (Join-Path $d 'e.txt')
+        $erro = (Get-Content -LiteralPath (Join-Path $d 'e.txt') -ErrorAction SilentlyContinue | Select-Object -First 2) -join ' '
+        Assert-Equal 0 $p.ExitCode "o filho falhou: $erro"
+        Assert-True (Test-Path -LiteralPath (Join-Path $d 'saida\a.txt')) 'Expand-Archive nao extraiu'
+    } finally { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Start-WindowsPowerShellFile devolve o PSModulePath desta sessao intacto' {
+    $antes = $env:PSModulePath
+    $d = Join-Path ([System.IO.Path]::GetTempPath()) ("ps51-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $d -Force | Out-Null
+    try {
+        Set-Content -LiteralPath (Join-Path $d 'f.ps1') -Value 'exit 3' -Encoding ASCII
+        $p = Start-WindowsPowerShellFile -File (Join-Path $d 'f.ps1') -StdOut (Join-Path $d 'o.txt') -StdErr (Join-Path $d 'e.txt')
+        Assert-Equal 3 $p.ExitCode 'o codigo de saida do filho se perdeu'
+        Assert-Equal $antes $env:PSModulePath
+    } finally { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Get-WindowsPowerShellModulePath tira so a pasta de modulos embutidos do 7' {
+    $raiz = Join-Path ([System.IO.Path]::GetTempPath()) ("pmp-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $do7   = Join-Path $raiz 'windowsapps\microsoft.powershell_7\Modules'
+    $do51  = Join-Path $raiz 'WindowsPowerShell\v1.0\Modules'
+    $user  = Join-Path $raiz 'Documents\PowerShell\Modules'
+    foreach ($x in $do7, $do51) { New-Item -ItemType Directory -Path (Join-Path $x 'Microsoft.PowerShell.Security') -Force | Out-Null }
+    New-Item -ItemType Directory -Path $user -Force | Out-Null
+    $antes = $env:PSModulePath
+    try {
+        $env:PSModulePath = "$user;$do7;;$do51"
+        Assert-Equal "$user;$do51" (Get-WindowsPowerShellModulePath)
+    } finally {
+        $env:PSModulePath = $antes
+        Remove-Item $raiz -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+It 'os instaladores de terceiros rodam pelo helper, nao por Start-Process cru' {
+    foreach ($arq in 'Install-Herdr.ps1', 'Install-HerdrApp.ps1') {
+        $src = Get-Content -Raw -LiteralPath (Join-Path $scriptsDir $arq)
+        Assert-True ($src -match 'Start-WindowsPowerShellFile') "$arq nao usa o helper"
+        Assert-True ($src -notmatch "Start-Process -FilePath 'powershell\.exe'") "$arq voltou a chamar powershell.exe direto"
+    }
+}
+
+Write-Host ''
+Write-Host '=== Testes: Herdr app (opcional) ===' -ForegroundColor Cyan
+
+function New-TempJson {
+    $f = Join-Path ([System.IO.Path]::GetTempPath()) ("happ-" + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.json')
+    $script:tmpFiles += $f
+    return $f
+}
+
+It 'Setup.ps1 conta o passo -HerdrApp e o deixa fora do -All' {
+    $src = Get-Content -Raw -LiteralPath (Join-Path $repoRaiz 'Setup.ps1')
+    Assert-True ($src -match '\$Herdr, \$HerdrApp, \$Privacy') 'o passo fica fora da contagem'
+    Assert-True ($src -match '-or \$HerdrApp -or') 'pedir so -HerdrApp cairia na verificacao'
+    $all = [regex]::Match($src, '(?s)if \(\$All\) \{.*?\n\}').Value
+    Assert-True ($all.Length -gt 0) 'bloco do -All nao encontrado'
+    Assert-True ($all -notmatch 'HerdrApp') 'o -All passou a instalar o Herdr app'
+}
+
+It 'Disable-HerdrAppTelemetry preserva o resto do settings.json e nao grava BOM' {
+    $f = New-TempJson
+    [System.IO.File]::WriteAllText($f, '{ "zoom": 1.2, "sounds": { "enabled": true } }')
+    Assert-Equal 'desligada' (Disable-HerdrAppTelemetry -Settings $f)
+    $j = Get-Content -Raw -LiteralPath $f | ConvertFrom-Json
+    Assert-Equal $false $j.telemetry
+    Assert-Equal 1.2 $j.zoom 'chave alheia perdida'
+    Assert-Equal $true $j.sounds.enabled 'objeto aninhado perdido'
+    Assert-True ([System.IO.File]::ReadAllBytes($f)[0] -ne 0xEF) 'gravou BOM'
+    Assert-Equal 'ja' (Disable-HerdrAppTelemetry -Settings $f) 'segunda passada regravou'
+}
+
+It 'Disable-HerdrAppTelemetry cria o arquivo quando ele nao existe' {
+    $d = Join-Path ([System.IO.Path]::GetTempPath()) ("happ-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $f = Join-Path $d 'settings.json'
+    try {
+        Assert-Equal 'desligada' (Disable-HerdrAppTelemetry -Settings $f)
+        Assert-Equal $false (Get-Content -Raw -LiteralPath $f | ConvertFrom-Json).telemetry
+    } finally { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+It 'Disable-HerdrAppTelemetry nao regrava arquivo que nao conseguiu ler' {
+    foreach ($ruim in '{ "zoom": 1.2, // comentario', '[1, 2]') {
+        $f = New-TempJson
+        [System.IO.File]::WriteAllText($f, $ruim)
+        Assert-Equal 'ilegivel' (Disable-HerdrAppTelemetry -Settings $f)
+        Assert-Equal $ruim ([System.IO.File]::ReadAllText($f)) 'arquivo ilegivel foi regravado'
+    }
+}
+
+It 'Disable-HerdrAppTelemetry -WhatIf nao grava nada' {
+    $f = New-TempJson
+    [System.IO.File]::WriteAllText($f, '{ "zoom": 1 }')
+    Assert-Equal 'simulado' (Disable-HerdrAppTelemetry -Settings $f -WhatIf)
+    Assert-Equal '{ "zoom": 1 }' ([System.IO.File]::ReadAllText($f))
+}
+
+It 'Install-HerdrApp repassa -WhatIf e confere a assinatura antes de executar' {
+    $src = Get-Content -Raw -LiteralPath (Join-Path $scriptsDir 'Install-HerdrApp.ps1')
+    Assert-True ($src -match 'Disable-HerdrAppTelemetry[^\r\n]*-WhatIf:') '-WhatIf nao atravessa o modulo sozinho'
+    # a primeira execucao de um binario instalado tem que vir depois da checagem
+    $iSig = $src.IndexOf('Test-HerdrAppSignature -Path')
+    $iRun = $src.IndexOf('& $alvo.Exe --version')
+    Assert-True ($iSig -gt 0 -and $iRun -gt $iSig) 'o binario e executado antes de a assinatura ser conferida'
+}
+
+It 'Test-HerdrAppSignature recusa binario sem assinatura sem lancar' {
+    $f = (New-TempJson) -replace '\.json$', '.exe'
+    $script:tmpFiles += $f
+    Set-Content -LiteralPath $f -Value 'nao e um executavel' -Encoding ASCII
+    Assert-Equal $false (Test-HerdrAppSignature -Path $f).Ok
+    Assert-Equal $false (Test-HerdrAppSignature -Path "$f.nao-existe").Ok
+    # assinado, mas por outro: o powershell.exe e assinado pela Microsoft
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (Test-Path -LiteralPath $ps) {
+        Assert-Equal $false (Test-HerdrAppSignature -Path $ps).Ok 'aceitou assinatura valida de outro emissor'
+    }
 }
 
 # limpeza

@@ -19,6 +19,10 @@ Ele instala o RustDesk → aplica as duas configs → watchdog → **energia, se
 instala e configura o Herdr com o servidor no logon → **privacy mode por padrão** → grava a
 senha permanente → verifica. Ao final a máquina está pronta, sem passo manual pendente.
 
+`-HerdrApp` (a janela do Herdr e o `hc`) é **opcional e fica fora do `-All`** de propósito:
+é outro produto, com outro runtime, e não cobre o Terminal com a tela bloqueada. Só rode se
+o usuário pedir o app. Não o ponha no `-All` nem o trate como substituto do `-Herdr`.
+
 O número de passos é **calculado**, não literal: o de energia é condicional. Se acrescentar um
 passo, não volte a escrever `'3/5'` na mão.
 
@@ -116,6 +120,18 @@ afetam quem edita este repo:
 - **`Get-ScheduledTask` sem elevação devolve vazio** para tarefas de SYSTEM em vez de negar
   acesso — falso negativo silencioso. Tarefas do próprio usuário (como `HerdrServer`) são
   consultáveis sem elevação.
+- **`powershell.exe` filho de `pwsh` 7 não carrega `Expand-Archive`, `Get-FileHash` nem
+  `Get-AuthenticodeSignature`** — herda o `PSModulePath` do 7. Para rodar um `.ps1` de
+  terceiro use `Start-WindowsPowerShellFile` (lib), nunca `Start-Process powershell.exe`
+  direto. Há teste que reprova quem voltar.
+- **O launcher do Herdr resolve o binário a cada logon.** Não volte a gravar nele o caminho
+  que `Get-HerdrPaths` devolve na hora: a pasta é versionada e o autostart passa a subir o
+  servidor antigo depois de um `herdr update`. O marcador `launcher-herdr: resolve-na-hora`
+  é o que a verificação procura.
+- **Nunca pare o `herdr server` para testar** se a sessão do agente roda dentro de um pane
+  do Herdr (`HERDR_ENV=1`): o agente morre junto.
+- **O Herdr app se atualiza sozinho.** Não há pin nem opção para desligar; a defesa é a
+  assinatura (`Test-HerdrAppSignature`), conferida na instalação e a cada verificação.
 - **O Herdr recarrega sem reiniciar** (`herdr server reload-config`), diferente do RustDesk.
 - **Privacy mode é pedido pelo cliente, não pelo host.** Não existe opção de host que o ligue:
   `enable-privacy-mode` é só permissão. O padrão do projeto é `Setup.ps1 -Privacy`

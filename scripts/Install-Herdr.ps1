@@ -128,9 +128,11 @@ if ($paths.Installed) {
             # verificacao do binario baixado) e todos parecem iguais de fora.
             $outFile = "$tmp.out"
             $errFile = "$tmp.err"
-            $p = Start-Process -FilePath 'powershell.exe' -Wait -PassThru -NoNewWindow `
-                    -RedirectStandardOutput $outFile -RedirectStandardError $errFile `
-                    -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $tmp)
+            #
+            # Start-WindowsPowerShellFile limpa o PSModulePath do filho: o
+            # instalador usa Expand-Archive, que no 5.1 filho de um pwsh 7
+            # carrega o modulo do 7 e falha.
+            $p = Start-WindowsPowerShellFile -File $tmp -StdOut $outFile -StdErr $errFile
 
             $saidaInst = @()
             foreach ($f in @($outFile, $errFile)) {
